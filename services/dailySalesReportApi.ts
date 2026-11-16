@@ -61,6 +61,8 @@ export interface DailySummary {
 
 export interface InvoiceHistoryRow {
     invoice_no: string;
+    order_no?: string;
+    order_date?: string;
     date: string;
     brand: string;
     customer: string;

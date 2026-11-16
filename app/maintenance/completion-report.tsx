@@ -217,7 +217,7 @@ export default function CompletionReportScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    pad: { padding: 16, gap: 12, paddingBottom: 120 },
+    pad: { padding: 16, gap: 12, paddingBottom: 32 },
     hint: { fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: 20 },
     sectionTitle: { fontSize: 13, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1, marginTop: 8 },
     recordCard: { borderWidth: 1, borderRadius: Radius.lg, padding: 14, gap: 6 },

@@ -158,7 +158,7 @@ export default function CustomerVisitScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    pad: { padding: 16, gap: 8, paddingBottom: 120 },
+    pad: { padding: 16, gap: 8, paddingBottom: 32 },
     label: { fontSize: 13, fontWeight: '700', marginTop: 12, marginBottom: 4 },
     valueText: { fontSize: 15, fontWeight: '700' },
     input: { borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, borderWidth: 1 },

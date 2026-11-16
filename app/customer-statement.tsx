@@ -207,7 +207,7 @@ export default function CustomerStatementScreen() {
                     </TouchableOpacity>
                 </View>
             ) : (
-                <ScrollView contentContainerStyle={{ padding: s(16), gap: vs(10), paddingBottom: 120 + insets.bottom }} keyboardShouldPersistTaps="handled">
+                <ScrollView contentContainerStyle={{ padding: s(16), gap: vs(10), paddingBottom: 32 + insets.bottom }} keyboardShouldPersistTaps="handled">
                     <View style={[styles.searchBox, Shadow.card(theme), { backgroundColor: colors.surface, borderColor: colors.border }]}>
                         <Ionicons name="search" size={16} color={colors.textSecondary} />
                         <TextInput

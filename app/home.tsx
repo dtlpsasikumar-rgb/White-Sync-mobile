@@ -443,7 +443,7 @@ export default function HomeScreen() {
                 ref={scrollRef}
                 onContentSizeChange={pinToTopWhileSettling}
                 style={styles.scrollContent}
-                contentContainerStyle={{ paddingBottom: 170 + insets.bottom }}
+                contentContainerStyle={{ paddingBottom: 60 + insets.bottom }}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} />}>
                 <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
                 {permissionDenied ? (
