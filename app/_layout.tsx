@@ -32,7 +32,7 @@ function RootLayoutContent() {
   return (
     <NavigationProvider value={theme === 'dark' ? DarkTheme : DefaultTheme}>
       {/* Keeps every page's last items clear of the phone's bottom bar (the gap is the page background colour). */}
-      <View style={{ flex: 1, paddingBottom: insets.bottom + 48, backgroundColor: Colors[theme].background }}>
+      <View style={{ flex: 1, paddingBottom: insets.bottom + 16, backgroundColor: Colors[theme].background }}>
         {/* Without an explicit contentStyle, the native stack's own screen
           * container defaults to white while a screen transitions/mounts —
           * briefly visible as a white flash on back navigation, especially

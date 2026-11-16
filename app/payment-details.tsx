@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/theme';
@@ -28,6 +27,11 @@ const dmy = (ymd: string) => {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 };
 const toIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const shiftIso = (iso: string, days: number) => {
+    const d = new Date(`${iso}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    return toIso(d);
+};
 
 /** Tally bank-book receipts for one day, as on the ERP Daily Sales Report "Payment Details" tab. */
 export default function PaymentDetailsScreen() {
@@ -36,8 +40,8 @@ export default function PaymentDetailsScreen() {
     const theme = useColorScheme() ?? 'light';
     const colors = Colors[theme];
 
-    const [dateIso, setDateIso] = useState(localTodayIso());
-    const [iosPickerOpen, setIosPickerOpen] = useState(false);
+    // Defaults to yesterday: today's receipts are usually not complete yet.
+    const [dateIso, setDateIso] = useState(() => shiftIso(localTodayIso(), -1));
     const [lines, setLines] = useState<BankLine[]>([]);
     const [execMap, setExecMap] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(true);
@@ -65,20 +69,6 @@ export default function PaymentDetailsScreen() {
         return () => { cancelled = true; };
     }, [dateIso]);
 
-    const openPicker = () => {
-        if (Platform.OS === 'android') {
-            DateTimePickerAndroid.open({
-                value: new Date(`${dateIso}T00:00:00`),
-                mode: 'date',
-                maximumDate: new Date(),
-                onChange: (event, selected) => {
-                    if (event.type === 'set' && selected) setDateIso(toIso(selected));
-                },
-            });
-        } else {
-            setIosPickerOpen(v => !v);
-        }
-    };
 
     /** Builds the bank-book PDF and returns its local file. */
     const makePdf = async () => {
@@ -142,23 +132,24 @@ export default function PaymentDetailsScreen() {
                 }
             />
 
-            <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 120 + insets.bottom }]} keyboardShouldPersistTaps="handled">
-                <TouchableOpacity style={[styles.dateBox, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={openPicker}>
-                    <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
-                    <Text style={[styles.dateText, { color: colors.text }]}>{dmy(dateIso.replace(/-/g, ''))}</Text>
-                    {loading
-                        ? <ActivityIndicator size="small" color={colors.primary} />
-                        : <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />}
-                </TouchableOpacity>
-                {iosPickerOpen && Platform.OS === 'ios' && (
-                    <DateTimePicker
-                        value={new Date(`${dateIso}T00:00:00`)}
-                        mode="date"
-                        display="inline"
-                        maximumDate={new Date()}
-                        onChange={(_e, selected) => { if (selected) setDateIso(toIso(selected)); }}
-                    />
-                )}
+            <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 32 + insets.bottom }]} keyboardShouldPersistTaps="handled">
+                <View style={[styles.dateBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <TouchableOpacity style={styles.arrowBtn} onPress={() => setDateIso(shiftIso(dateIso, -1))} accessibilityLabel="Previous day">
+                        <Ionicons name="chevron-back" size={22} color={colors.primary} />
+                    </TouchableOpacity>
+                    <View style={styles.dateCenter}>
+                        <Text style={[styles.dateText, { color: colors.text }]}>{dmy(dateIso.replace(/-/g, ''))}</Text>
+                        {loading && <ActivityIndicator size="small" color={colors.primary} />}
+                    </View>
+                    <TouchableOpacity
+                        style={styles.arrowBtn}
+                        onPress={() => setDateIso(shiftIso(dateIso, 1))}
+                        disabled={dateIso >= localTodayIso()}
+                        accessibilityLabel="Next day"
+                    >
+                        <Ionicons name="chevron-forward" size={22} color={dateIso >= localTodayIso() ? colors.textSecondary : colors.primary} />
+                    </TouchableOpacity>
+                </View>
 
                 {error ? (
                     <Text style={[styles.hint, { color: colors.danger }]}>{error}</Text>
@@ -198,8 +189,10 @@ const styles = StyleSheet.create({
     pad: { padding: 16, gap: 10 },
     headerActions: { flexDirection: 'row', gap: 8 },
     headerBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
-    dateBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 14 },
-    dateText: { flex: 1, fontSize: 15, paddingVertical: 12, fontWeight: '600' },
+    dateBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 4 },
+    arrowBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+    dateCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    dateText: { fontSize: 15, fontWeight: '700' },
     hint: { fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: 24 },
     sub: { fontSize: 12, fontWeight: '500' },
     card: { borderWidth: 1, borderRadius: Radius.md, padding: 12, gap: 4 },

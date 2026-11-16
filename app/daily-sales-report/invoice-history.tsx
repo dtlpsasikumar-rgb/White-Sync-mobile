@@ -110,6 +110,13 @@ function disPctColor(value: number | null | undefined, listPrice: number | null 
 }
 
 /** LC (Labour Charges) and COMM invoices carry no purchase cost, so Profit / Margin % is blank for them, as on the ERP page. */
+/** HOS for a brand, as the ERP Sales Invoice History shows it. */
+function hosFor(brand: string | undefined) {
+    const b = String(brand || '').trim().toUpperCase();
+    const purushothaman = b === 'ARISTO' || b === 'BRITE' || b === 'SUPREME' || b === 'VELPLAST' || b.indexOf('WHITE') === 0;
+    return purushothaman ? 'N.PURUSHOTHAMAN' : 'M.MANIVANNAN';
+}
+
 function isLcOrCommInvoice(invoiceNo: string | undefined) {
     const s = (invoiceNo || '').toUpperCase();
     return s.startsWith('LC') || s.startsWith('COMM');
@@ -317,19 +324,23 @@ const InvoiceCard = React.memo(function InvoiceCard({ item, revealed, colors, st
                     </View>
                     <View style={styles.metricGridNoBorder}>
                         <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Invoice Total</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{formatPlain(item.invoice_total_value)}</Text></View>
-                        <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>LP26</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{formatPlain(item.list_price)}</Text></View>
-                        <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>DIS%</Text><Text style={[styles.mValue, { color: disPctColor(item.discount_percentage, item.list_price, colors), fontWeight: '800' }]} numberOfLines={1} adjustsFontSizeToFit>{formatDisPct(item.discount_percentage, item.list_price)}</Text></View>
+                        <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Order No</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{item.order_no || '-'}</Text></View>
+                        <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Order Date</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{item.order_date ? ddmmyyyy(item.order_date) : '-'}</Text></View>
                     </View>
-                    {showProfit && (
-                        <View style={styles.metricGridNoBorder}>
-                            <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Profit</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{formatPlain(item.profit)}</Text></View>
-                            <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Margin %</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{formatPlain(item.margin)}</Text></View>
-                        </View>
+                    {revealed && (
+                        <>
+                            <View style={styles.metricGridNoBorder}>
+                                <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>LP26</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{formatPlain(item.list_price)}</Text></View>
+                                <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>DIS%</Text><Text style={[styles.mValue, { color: disPctColor(item.discount_percentage, item.list_price, colors), fontWeight: '800' }]} numberOfLines={1} adjustsFontSizeToFit>{formatDisPct(item.discount_percentage, item.list_price)}</Text></View>
+                                {showProfit && <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Profit</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{formatPlain(item.profit)}</Text></View>}
+                            </View>
+                            <View style={styles.metricGridNoBorder}>
+                                {showProfit && <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Margin %</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{formatPlain(item.margin)}</Text></View>}
+                                <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>HOS</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{hosFor(item.brand)}</Text></View>
+                                <View style={styles.mCell}><Text style={[styles.mLabel, { color: colors.textSecondary }]} numberOfLines={1} adjustsFontSizeToFit>Sales Executive</Text><Text style={[styles.mValue, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>{item.sales_executive ? item.sales_executive.toUpperCase() : '-'}</Text></View>
+                            </View>
+                        </>
                     )}
-                    <View style={styles.invoiceFoot}>
-                        <Ionicons name="person-circle-outline" size={13} color={colors.textSecondary} />
-                        <Text style={[styles.invoiceFootText, { color: colors.textSecondary }]}>{item.sales_executive ? item.sales_executive.toUpperCase() : '—'}</Text>
-                    </View>
                 </>
             )}
         </View>

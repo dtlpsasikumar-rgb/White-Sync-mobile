@@ -19,7 +19,7 @@ export type StockData = {
     items: StockItem[];
     binsByItem: Record<string, StockBin[]>;
     tally: Record<string, number>;
-    lots: Record<string, { lots: [string, string, string, number, number][] }>;
+    lots: Record<string, { lots: [string, string, string, number, number][]; cv?: number }>;
 };
 
 const session = () => SecureStore.getItemAsync('session_cookies');

@@ -51,12 +51,14 @@ export default function StockListScreen() {
     useEffect(() => { load(); }, []);
 
     const brandCounts = useMemo(() => {
-        const counts: Record<string, { all: number; stock: number }> = {};
+        const counts: Record<string, { all: number; stock: number; value: number }> = {};
         (data?.items || []).forEach(it => {
             const k = stockBrandOf(it) || '';
-            counts[k] = counts[k] || { all: 0, stock: 0 };
+            counts[k] = counts[k] || { all: 0, stock: 0, value: 0 };
             counts[k].all++;
             if (stockTotal(data!, it.item_code) > 0) counts[k].stock++;
+            // Stock value: the closing value of the item from the Tally purchase lots, as on ERP
+            counts[k].value += Number(data!.lots[it.item_code]?.cv || 0);
         });
         return counts;
     }, [data]);
@@ -118,7 +120,7 @@ export default function StockListScreen() {
                     </TouchableOpacity>
                 </View>
             ) : !data ? null : itemCode && item ? (
-                <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 120 + insets.bottom }]}>
+                <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 32 + insets.bottom }]}>
                     <Text style={[styles.code, { color: colors.textSecondary }]}>{item.item_code}</Text>
                     <Text style={[styles.name, { color: colors.text }]}>{item.item_name}</Text>
                     <Text style={[styles.sub, { color: colors.textSecondary }]}>{brand} · UOM {item.stock_uom}</Text>
@@ -139,7 +141,7 @@ export default function StockListScreen() {
                     <LotsSection data={data} code={item.item_code} colors={colors} />
                 </ScrollView>
             ) : brand ? (
-                <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 120 + insets.bottom }]} keyboardShouldPersistTaps="handled">
+                <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 32 + insets.bottom }]} keyboardShouldPersistTaps="handled">
                     <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                         <Ionicons name="search" size={16} color={colors.textSecondary} />
                         <TextInput
@@ -185,9 +187,9 @@ export default function StockListScreen() {
                     )}
                 </ScrollView>
             ) : (
-                <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 120 + insets.bottom }]}>
+                <ScrollView contentContainerStyle={[styles.pad, { paddingBottom: 32 + insets.bottom }]}>
                     {STOCK_BRANDS.map(b => {
-                        const c = brandCounts[b] || { all: 0, stock: 0 };
+                        const c = brandCounts[b] || { all: 0, stock: 0, value: 0 };
                         return (
                             <TouchableOpacity
                                 key={b}
@@ -197,6 +199,7 @@ export default function StockListScreen() {
                                 <View style={{ flex: 1 }}>
                                     <Text style={[styles.itemName, { color: colors.text }]}>{b}</Text>
                                     <Text style={[styles.sub, { color: colors.textSecondary }]}>{c.all} items · {c.stock} with stock</Text>
+                                    <Text style={[styles.sub, { color: colors.danger, fontWeight: '800' }]}>Stock value ₹ {(c.value / 100000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</Text>
                                 </View>
                                 <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
                             </TouchableOpacity>
