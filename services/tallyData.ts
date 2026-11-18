@@ -149,7 +149,20 @@ export function executiveFor(line: BankLine, map: Record<string, string>) {
 /** yyyymmdd -> yyyy-mm-dd */
 export const ymdToIso = (ymd: string) => `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
 
-export function bankBookHtml(ymd: string, lines: BankLine[]) {
+/** Every bank receipt line (yyyymmdd, vch type, vch no, particulars, amount). */
+export async function loadAllBankLines(): Promise<BankLine[]> {
+    const all = await noteJson('Tally Bank Debits');
+    return (all[PAY_BANK_NAME] || []) as BankLine[];
+}
+
+/** Customer names that appear on the receipts, as the ERP customer picker lists them. */
+export function bankCustomerNames(lines: BankLine[]): string[] {
+    const seen = new Set<string>();
+    lines.forEach(r => String(r[3] || '').split(', ').forEach(n => { const k = n.trim(); if (k) seen.add(k); }));
+    return Array.from(seen).sort();
+}
+
+export function bankBookHtml(fromYmd: string, toYmd: string, who: string, lines: BankLine[]) {
     const money = (n: number) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const dmy = (y: string) => {
         const d = new Date(`${ymdToIso(y)}T00:00:00`);
@@ -171,9 +184,10 @@ export function bankBookHtml(ymd: string, lines: BankLine[]) {
   <div>130 RAMALINGAM ROAD</div><div>R.S.PURAM</div><div>COIMBATORE - 641 002.</div>
   <div>MSME : UDYAM/TN-03-0011357</div><div>Contact : 0422-2470625,0422-2470280</div>
   <div style="font-weight:bold;margin-top:14px;">${esc(PAY_BANK_NAME)}  Book</div>
-  <div>For ${dmy(ymd)}</div>
+  <div>${esc(who)}</div>
+  <div>For ${dmy(fromYmd)} to ${dmy(toYmd)}</div>
 </div>
-<table><thead><tr><th>Date</th><th>Particulars</th><th>Vch Type</th><th>Vch No.</th><th class="r">Debit</th></tr></thead>
+<table><thead><tr><th>Date</th><th>Particulars</th><th>Vch Type</th><th>Vch No.</th><th class="r">Received Amount</th></tr></thead>
 <tbody>${rows}<tr class="tot"><td></td><td>Total</td><td></td><td></td><td class="r">${money(total)}</td></tr></tbody></table>
 </body></html>`;
 }
