@@ -17,24 +17,32 @@ const SERIES: Record<string, Record<RequestType, string>> = {
     PRECITEX: { quotation: 'PRE/WC/2026-27/', proforma: 'PRE/WC/2026-27/-P' },
     INSPIRON: { quotation: 'INSP/WC/2026-27/', proforma: 'SAL-PRF-.YYYY.-' },
     SUPREME: { quotation: 'SUP/WC/LET/2026-2027/', proforma: 'SUP/WC/LET/2026-2027/P-' },
-    STERLING: { quotation: 'SAL-QTN-.YYYY.-', proforma: 'SAL-PRF-.YYYY.-' },
+    STERLING: { quotation: 'SEI/QTN/2026-27/', proforma: 'SEI/Proforma/2026-27/' },
     WHITENCO: { quotation: 'WC/2026-27/-', proforma: 'SAL-PRF-.YYYY.-' },
     RMP: { quotation: 'RMP/WC/2026-27/', proforma: 'SAL-PRF-.YYYY.-' },
 };
 
-export type RequestItem = { item_code: string; item_name: string; stock_uom: string };
+/** Naming series for "From White & Co" Quotations and Proformas (as shown in ERP's White & Co chooser). */
+const WHITE_CO_SERIES = 'WC/2026-27/-';
+
+/** ERP print formats for White & Co Quotation and Proforma (first entry in ERP's picker for each). */
+export const WHITE_CO_PRINT = { quotation: 'Precitex', proforma: 'Proforma Invoice Precitex' };
+
+export type RequestItem ={ item_code: string; item_name: string; stock_uom: string };
 
 const session = () => SecureStore.getItemAsync('session_cookies');
 
 /** Items of one brand, matched on code or name. */
 export async function searchItemsByBrand(brand: string, query: string): Promise<RequestItem[]> {
     const q = query.trim();
+    // Only this brand's items; a blank query lists the brand's items in name order.
     const filters: any[] = [['brand', '=', brand], ['disabled', '=', 0], ['has_variants', '=', 0]];
     if (q) filters.push(['item_name', 'like', `%${q}%`]);
     const qs =
         `fields=${encodeURIComponent(JSON.stringify(['item_code', 'item_name', 'stock_uom']))}` +
         `&filters=${encodeURIComponent(JSON.stringify(filters))}` +
-        `&limit_page_length=30`;
+        `&order_by=${encodeURIComponent('item_name asc')}` +
+        `&limit_page_length=200`;
     const res = await apiGet(apiUrl(`/api/resource/Item?${qs}`), await session());
     if (!res.ok) return [];
     return ((res.data as any)?.data || []) as RequestItem[];
@@ -60,6 +68,10 @@ export async function createRequestDraft(p: {
     brand: string;
     customerId: string;
     lines: { item: RequestItem; qty: number }[];
+    /** "From White & Co" uses one series for both Quotation and Proforma, as ERP does. */
+    whiteCoSeries?: boolean;
+    /** Logged-in user's email, saved as the Quotation Approver (an ERP User). */
+    approverEmail?: string;
 }): Promise<string> {
     const today = new Date();
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
@@ -76,9 +88,12 @@ export async function createRequestDraft(p: {
         company: 'White & Co.',
         currency: 'INR',
         selling_price_list: 'Standard Selling',
-        naming_series: SERIES[p.brand][p.type],
+        naming_series: p.whiteCoSeries ? WHITE_CO_SERIES : SERIES[p.brand][p.type],
+        // "From White & Co" drafts get ERP's White & Co print formats (the same ones ERP's picker offers).
+        ...(p.whiteCoSeries ? { print_format: p.type === 'quotation' ? WHITE_CO_PRINT.quotation : WHITE_CO_PRINT.proforma } : {}),
         brand: p.brand,
         status: 'Draft',
+        ...(p.approverEmail ? { quotation_approver: p.approverEmail } : {}),
         items: p.lines.map(l => ({ item_code: l.item.item_code, item_name: l.item.item_name, qty: l.qty, uom: l.item.stock_uom, brand: p.brand })),
     };
     const res = await apiPost(apiUrl('/api/resource/Quotation'), body, await session());
@@ -87,4 +102,55 @@ export async function createRequestDraft(p: {
         throw new Error(erpErrorText(res.data) || 'ERP did not accept the request.');
     }
     return name;
+}
+
+/** Address that receives every mobile quotation request. */
+export const SALES_CBE_EMAIL = 'sales-cbe@whitenco.net';
+
+/**
+ * Emails a saved Draft to the sales-cbe account, using ERP's own mail sender and
+ * the outgoing account ERP has set up. The mobile user's email goes in as the sender.
+ * Throws with the reason if ERP does not send it.
+ */
+export async function emailQuotationToSales(p: {
+    name: string;
+    /** Running number of this phone's requests, shown in the subject. */
+    requestNo: number;
+    senderEmail: string;
+    senderName: string;
+    typeLabel: string;
+    customerLabel: string;
+    lines: { item: RequestItem; qty: number }[];
+}): Promise<void> {
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const now = new Date();
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const date = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
+    const itemRows = p.lines
+        .map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.item.item_name)}</td><td style="text-align:right">${l.qty}</td></tr>`)
+        .join('');
+    const content =
+        `<p>Dear Sir/Madam,</p>` +
+        `<p>Please send a quotation for the following item(s).</p>` +
+        `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>S.No</th><th>Item</th><th>Qty</th></tr>${itemRows}</table>` +
+        `<p>Customer: <b>${esc(p.customerLabel)}</b><br>Date: ${date}</p>` +
+        `<p>Regards,<br>${esc(p.senderName || p.senderEmail)}</p>`;
+
+    const body = {
+        doctype: 'Quotation',
+        name: p.name,
+        recipients: SALES_CBE_EMAIL,
+        sender: p.senderEmail,
+        sender_full_name: p.senderName || p.senderEmail,
+        subject: `Quotation Request ${p.requestNo} on ${date} from ${p.customerLabel}`,
+        content,
+        communication_medium: 'Email',
+        send_email: 1,
+        send_me_a_copy: 0,
+    };
+    const res = await apiPost(apiUrl('/api/method/frappe.core.doctype.communication.email.make'), body, await session());
+    const ok = res.ok && !!(res.data as any)?.message;
+    if (!ok) {
+        throw new Error(erpErrorText(res.data) || 'ERP did not send the email.');
+    }
 }

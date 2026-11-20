@@ -183,9 +183,9 @@ export default function CreateSalesOrderScreen() {
      * URL, so a quote character produced malformed filter JSON and `%` or `_`
      * silently acted as SQL wildcards.
      */
-    const likeSearchUrl = (doctype: string, field: string, query: string, fields: string[]) => {
+    const likeSearchUrl = (doctype: string, field: string, query: string, fields: string[], extra: any[] = []) => {
         const escaped = query.trim().replace(/[\\%_]/g, c => `\\${c}`);
-        const filters = JSON.stringify([[field, 'like', `%${escaped}%`]]);
+        const filters = JSON.stringify([[field, 'like', `%${escaped}%`], ...extra]);
 
         return apiUrl(
             `/api/method/frappe.client.get_list?doctype=${encodeURIComponent(doctype)}` +
@@ -199,7 +199,7 @@ export default function CreateSalesOrderScreen() {
         setIsSearching(true);
         try {
             const cookies = await SecureStore.getItemAsync('session_cookies');
-            const res = await apiGet(likeSearchUrl('Customer', 'customer_name', query, ['name', 'customer_name']), cookies);
+            const res = await apiGet(likeSearchUrl('Customer', 'customer_name', query, ['name', 'customer_name'], [['disabled', '=', 0]]), cookies);
             if (res.ok) setSearchResults(res.data?.message || []);
         } catch (e) {
             console.error(e);

@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useResponsive } from '@/hooks/useResponsive';
-import { Customer } from '@/services/frappeSearch';
+import { Customer, getEnabledCustomerNames } from '@/services/frappeSearch';
 import { getUsedCustomers } from '@/services/dailySalesReportApi';
 import {
     StatementDoc,
@@ -55,8 +55,10 @@ export default function CustomerStatementScreen() {
         (async () => {
             setLoadingList(true);
             const used = await getUsedCustomers({ fromDate: '2024-01-01', toDate: localTodayIso() });
+            // Only enabled customers in ERP are listed.
+            const enabled = used.ok ? await getEnabledCustomerNames() : null;
             if (cancelled) return;
-            const names = used.ok ? used.data : [];
+            const names = used.ok && enabled ? used.data.filter(n => enabled.has(n)) : [];
             // Records whose names match once punctuation is removed (e.g. "PLANT - 5" and "PLANT � 5")
             // are one customer in the list. Each entry keeps all of its records; the statement uses
             // the first one that ERP can resolve.

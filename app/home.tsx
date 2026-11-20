@@ -516,7 +516,7 @@ export default function HomeScreen() {
                         <SectionHeader title="Quick Navigation" subtitle="Tap a section to open it" icon="apps" />
                         <View style={styles.navSection}>
                             {([
-                                { label: 'QUOTATION', sub: 'Create & track quotations', icon: 'document-text', from: '#FBBF24', to: '#F97316', route: '/quotations', mode: 'replace' as const },
+                                { label: 'QUOTATION CREATED', sub: 'Create & track quotations', icon: 'document-text', from: '#FBBF24', to: '#F97316', route: '/quotations', mode: 'replace' as const },
                                 { label: 'QUOTATION / PROFORMA REQUEST', sub: 'Brand, customer, item & quantity', icon: 'create', from: '#FCD34D', to: '#EA580C', route: '/quotation-request', mode: 'push' as const },
                                 { label: 'CUSTOMER PURCHASE ORDER', sub: 'Orders from customers', icon: 'cart', from: '#2DD4BF', to: '#0D9488', route: '/sales-orders', mode: 'replace' as const },
                                 { label: 'SALES INVOICE HISTORY (DETAILED)', sub: 'Line-item invoice detail', icon: 'receipt', from: '#38BDF8', to: '#0284C7', route: '/daily-sales-report/invoice-history', mode: 'push' as const },
