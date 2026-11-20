@@ -117,6 +117,21 @@ export async function getCustomersByNames(names: string[]): Promise<SearchResult
     }
 }
 
+/** Names of every enabled customer in ERP (disabled = 0). Used to filter lists that come from elsewhere. */
+export async function getEnabledCustomerNames(): Promise<Set<string> | null> {
+    try {
+        const filters = JSON.stringify([['disabled', '=', 0]]);
+        const res = await apiGet(apiUrl(
+            `/api/resource/Customer?fields=${encodeURIComponent(JSON.stringify(['name']))}` +
+            `&filters=${encodeURIComponent(filters)}&limit_page_length=0`
+        ), await session());
+        if (!res.ok) return null;
+        return new Set(((res.data as any)?.data || []).map((c: { name: string }) => c.name));
+    } catch {
+        return null;
+    }
+}
+
 export async function getItemsByCodes(codes: string[]): Promise<SearchResult<Item>> {
     if (!codes.length) return { ok: true, data: [] };
     try {

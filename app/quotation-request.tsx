@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Radius, Shadow } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -11,6 +12,7 @@ import {
     RequestItem,
     RequestType,
     createRequestDraft,
+    emailQuotationToSales,
     searchItemsByBrand,
 } from '@/services/quotationRequest';
 
@@ -25,6 +27,7 @@ export default function QuotationRequestScreen() {
 
     const newLine = (key: number): Line => ({ key, item: null, query: '', results: [], qty: '' });
 
+    const [source, setSource] = useState<'white' | 'direct' | null>(null);
     const [type, setType] = useState<RequestType | null>(null);
     const [brand, setBrand] = useState<string | null>(null);
     const [customer, setCustomer] = useState<Customer | null>(null);
@@ -56,12 +59,16 @@ export default function QuotationRequestScreen() {
 
     const chooseBrand = (b: string) => {
         setBrand(b);
+        setType(null);
         setLines([newLine(1)]);
         nextKey.current = 2;
     };
 
+    /** Step back: form -> Quotation/Proforma -> brand -> source -> previous screen. */
     const onBack = () => {
         if (type) setType(null);
+        else if (brand) setBrand(null);
+        else if (source) setSource(null);
         else router.back();
     };
 
@@ -80,13 +87,43 @@ export default function QuotationRequestScreen() {
         }
         setSaving(true);
         try {
+            const lineList = lines.map(l => ({ item: l.item as RequestItem, qty: Number(l.qty) }));
+            const senderEmail = (await SecureStore.getItemAsync('user_id')) || '';
             const name = await createRequestDraft({
                 type,
                 brand,
                 customerId: customer.name,
-                lines: lines.map(l => ({ item: l.item as RequestItem, qty: Number(l.qty) })),
+                lines: lineList,
+                whiteCoSeries: source === 'white',
+                // The logged-in user is the quotation approver.
+                approverEmail: senderEmail || undefined,
             });
-            Alert.alert('Saved in ERP', `${name} was saved as a Draft in ERP.`, [{ text: 'OK', onPress: () => router.back() }]);
+            // The draft is saved; now email it to the sales-cbe account from the logged-in user's address.
+            const senderName = (await SecureStore.getItemAsync('user_name')) || '';
+            const typeLabel = type === 'quotation' ? 'Quotation' : 'Proforma';
+            // Running number for this phone's requests: 1, 2, 3 ...
+            const requestNo = (parseInt((await SecureStore.getItemAsync('quotation_request_no')) || '0', 10) || 0) + 1;
+            await SecureStore.setItemAsync('quotation_request_no', String(requestNo));
+            let mailNote = '';
+            if (!senderEmail) {
+                mailNote = 'Email not sent: your user email is not known. Log out and log in again.';
+            } else {
+                try {
+                    await emailQuotationToSales({
+                        name,
+                        requestNo,
+                        senderEmail,
+                        senderName,
+                        typeLabel,
+                        customerLabel: customer.customer_name || customer.name,
+                        lines: lineList,
+                    });
+                    mailNote = 'Emailed to sales-cbe@whitenco.net.';
+                } catch (e: any) {
+                    mailNote = `Saved, but the email was not sent: ${e?.message || 'unknown error'}`;
+                }
+            }
+            Alert.alert('Saved in ERP', `${name} was saved as a Draft in ERP.\n${mailNote}`, [{ text: 'OK', onPress: () => router.back() }]);
         } catch (e: any) {
             Alert.alert('Not saved', e?.message || 'ERP did not accept the request.');
         } finally {
@@ -104,11 +141,43 @@ export default function QuotationRequestScreen() {
             <Stack.Screen options={{ headerShown: false }} />
             <ScreenHeader
                 title="Quotation / Proforma"
-                subtitle={type ? (type === 'quotation' ? 'Quotation request' : 'Proforma request') : 'Choose a request type'}
+                subtitle={
+                    !source ? 'Choose a source'
+                    : !brand ? `${source === 'direct' ? 'Direct Supplier' : 'From White & Co'} · Choose a brand`
+                    : !type ? `${brand} · Quotation or Proforma`
+                    : `${brand} · ${type === 'quotation' ? 'Quotation' : 'Proforma'} request`
+                }
                 onBack={onBack}
             />
 
-            {!type ? (
+            {!source ? (
+                <View style={styles.typeWrap}>
+                    {([
+                        { key: 'white', label: 'From White & Co', icon: 'business' },
+                        { key: 'direct', label: 'Direct Supplier', icon: 'people' },
+                    ] as const).map(s => (
+                        <TouchableOpacity
+                            key={s.key}
+                            style={[styles.typeBtn, Shadow.card(theme), { backgroundColor: colors.surface, borderColor: colors.border }]}
+                            onPress={() => setSource(s.key)}
+                        >
+                            <Ionicons name={s.icon} size={26} color={colors.primary} />
+                            <Text style={[styles.typeText, { color: colors.text }]}>{s.label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+            ) : !brand ? (
+                <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
+                    <Text style={label}>Brand</Text>
+                    <View style={styles.chipRow}>
+                        {REQUEST_BRANDS.map(b => (
+                            <TouchableOpacity key={b} style={chip(false)} onPress={() => chooseBrand(b)}>
+                                <Text style={chipText(false)}>{b}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </ScrollView>
+            ) : !type ? (
                 <View style={styles.typeWrap}>
                     {(['quotation', 'proforma'] as RequestType[]).map(t => (
                         <TouchableOpacity
@@ -123,15 +192,6 @@ export default function QuotationRequestScreen() {
                 </View>
             ) : (
                 <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
-                    <Text style={label}>Brand</Text>
-                    <View style={styles.chipRow}>
-                        {REQUEST_BRANDS.map(b => (
-                            <TouchableOpacity key={b} style={chip(brand === b)} onPress={() => chooseBrand(b)}>
-                                <Text style={chipText(brand === b)}>{b}</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-
                     <Text style={label}>Customer</Text>
                     {customer ? (
                         <TouchableOpacity style={[styles.selected, { borderColor: colors.primary, backgroundColor: colors.primarySoft }]} onPress={() => { setCustomer(null); setCustomerQuery(''); }}>
@@ -181,7 +241,7 @@ export default function QuotationRequestScreen() {
                     )}
 
                     <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={save} disabled={saving}>
-                        {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>Save as Draft in ERP</Text>}
+                        {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>Save and Send to ERP</Text>}
                     </TouchableOpacity>
                 </ScrollView>
             )}
