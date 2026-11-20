@@ -118,6 +118,13 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export type StatementDoc = { fileName: string; uri: string; base64: string };
 export type BuildResult = { ok: true; doc: StatementDoc } | { ok: false; error: string };
 
+/** Note title for a financial year: the current year uses the plain note, earlier years use "FY 2025-26" etc. */
+export function noteTitleFor(base: string, fromIso: string) {
+    const y = parseInt(String(fromIso || '').slice(0, 4), 10);
+    if (!y || y >= 2026) return base;
+    return `${base} FY ${y}-${String(y + 1).slice(2)}`;
+}
+
 /** Builds the statement PDF and reads it back for the in-app viewer. Dates are yyyy-mm-dd; a blank `fromIso` means FY start. */
 export type StatementJob = { fileName: string; html: string };
 export type PrepareResult = { ok: true; job: StatementJob } | { ok: false; error: string };
@@ -129,7 +136,11 @@ export async function prepareStatement(kind: StatementKind, customer: string, fr
     const from = fromIso || fyStartIso(to);
     try {
         const info = await customerInfo(customer);
-        const [ledgers, bills] = await Promise.all([tallyNote('Tally Customer Ledgers'), tallyNote('Tally Customer Bills')]);
+        // Earlier financial years use their own saved notes ("... FY 2025-26"), as ERP does.
+        const [ledgers, bills] = await Promise.all([
+            tallyNote(noteTitleFor('Tally Customer Ledgers', from)),
+            tallyNote(noteTitleFor('Tally Customer Bills', from)),
+        ]);
         const keys = [normKey(customer), normKey(info.name)];
         const subset = (all: TallyRecord): TallyRecord =>
             Object.fromEntries(keys.filter(k => all[k]).map(k => [k, all[k]]));

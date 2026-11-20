@@ -34,6 +34,7 @@ export default function QuotationRequestScreen() {
     const [customerQuery, setCustomerQuery] = useState('');
     const [customerResults, setCustomerResults] = useState<Customer[]>([]);
     const [lines, setLines] = useState<Line[]>([newLine(1)]);
+    const [specialInstructions, setSpecialInstructions] = useState('');
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -97,6 +98,7 @@ export default function QuotationRequestScreen() {
                 whiteCoSeries: source === 'white',
                 // The logged-in user is the quotation approver.
                 approverEmail: senderEmail || undefined,
+                specialInstructions: specialInstructions.trim() || undefined,
             });
             // The draft is saved; now email it to the sales-cbe account from the logged-in user's address.
             const senderName = (await SecureStore.getItemAsync('user_name')) || '';
@@ -117,6 +119,7 @@ export default function QuotationRequestScreen() {
                         typeLabel,
                         customerLabel: customer.customer_name || customer.name,
                         lines: lineList,
+                        specialInstructions: specialInstructions.trim() || undefined,
                     });
                     mailNote = 'Emailed to sales-cbe@whitenco.net.';
                 } catch (e: any) {
@@ -237,6 +240,15 @@ export default function QuotationRequestScreen() {
                                 <Ionicons name="add" size={18} color={colors.primary} />
                                 <Text style={[styles.addItemText, { color: colors.primary }]}>Add item</Text>
                             </TouchableOpacity>
+                            <Text style={label}>Special Instructions</Text>
+                            <TextInput
+                                style={[field, { minHeight: 80, textAlignVertical: 'top' }]}
+                                placeholder="Optional"
+                                placeholderTextColor={colors.textSecondary}
+                                value={specialInstructions}
+                                onChangeText={setSpecialInstructions}
+                                multiline
+                            />
                         </>
                     )}
 

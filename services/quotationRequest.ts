@@ -72,6 +72,8 @@ export async function createRequestDraft(p: {
     whiteCoSeries?: boolean;
     /** Logged-in user's email, saved as the Quotation Approver (an ERP User). */
     approverEmail?: string;
+    /** Saved as the ERP Quotation's Special Instructions. */
+    specialInstructions?: string;
 }): Promise<string> {
     const today = new Date();
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
@@ -94,6 +96,7 @@ export async function createRequestDraft(p: {
         brand: p.brand,
         status: 'Draft',
         ...(p.approverEmail ? { quotation_approver: p.approverEmail } : {}),
+        ...(p.specialInstructions ? { custom_special_instructions: p.specialInstructions } : {}),
         items: p.lines.map(l => ({ item_code: l.item.item_code, item_name: l.item.item_name, qty: l.qty, uom: l.item.stock_uom, brand: p.brand })),
     };
     const res = await apiPost(apiUrl('/api/resource/Quotation'), body, await session());
@@ -121,6 +124,7 @@ export async function emailQuotationToSales(p: {
     typeLabel: string;
     customerLabel: string;
     lines: { item: RequestItem; qty: number }[];
+    specialInstructions?: string;
 }): Promise<void> {
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const now = new Date();
@@ -134,6 +138,9 @@ export async function emailQuotationToSales(p: {
         `<p>Please send a quotation for the following item(s).</p>` +
         `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>S.No</th><th>Item</th><th>Qty</th></tr>${itemRows}</table>` +
         `<p>Customer: <b>${esc(p.customerLabel)}</b><br>Date: ${date}</p>` +
+        (p.specialInstructions
+            ? `<p><b>Special Instructions:</b><br>${esc(p.specialInstructions).replace(/\n/g, '<br>')}</p>`
+            : '') +
         `<p>Regards,<br>${esc(p.senderName || p.senderEmail)}</p>`;
 
     const body = {
