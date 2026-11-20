@@ -47,6 +47,8 @@ export default function CustomerStatementScreen() {
     const [job, setJob] = useState<{ job: StatementJob; done: (json: string) => void } | null>(null);
     const [doc, setDoc] = useState<StatementDoc | null>(null);
     const [error, setError] = useState<string | null>(null);
+    // Ledger period: this financial year, or FY 2025-26 (1 Apr 2025 to 31 Mar 2026).
+    const [fy, setFy] = useState<'current' | 'fy2025'>('current');
 
     // Customers with sales invoices from 1 January 2024 onwards (the same names the
     // Sales Invoice History filter uses).
@@ -83,7 +85,7 @@ export default function CustomerStatementScreen() {
             return;
         }
         const q = query.trim().toLowerCase();
-        setResults(q ? allCustomers.filter(c => `${c.customer_name} ${c.name}`.toLowerCase().includes(q)) : allCustomers);
+        setResults(q ? allCustomers.filter(c => `${c.customer_name} ${c.name}`.toLowerCase().includes(q)) : []);
     }, [query, customer, allCustomers]);
 
     // Runs ERP's PDF code in a hidden WebView; resolves with the JSON the page posts back.
@@ -92,20 +94,19 @@ export default function CustomerStatementScreen() {
         setJob({ job: j, done: (json: string) => { clearTimeout(timer); setJob(null); resolve(json); } });
     });
 
-    const pickCustomer = async (c: Customer) => {
-        setCustomer(c);
-        setQuery(c.customer_name || c.name);
-        setResults([]);
+    // Builds the statement for one customer. 'fy2025' uses FY 2025-26 (1 Apr 2025 to 31 Mar 2026).
+    const buildFor = async (c: Customer, period: 'current' | 'fy2025') => {
         setDoc(null);
         setError(null);
         setBuilding(true);
-        // Blank dates: the statement runs from the fiscal year start to today.
+        const from = period === 'fy2025' ? '2025-04-01' : '';
+        const to = period === 'fy2025' ? '2026-03-31' : '';
         // Try each record of this customer until one gives a statement.
         const ids = (c as Customer & { ids?: string[] }).ids || [c.name];
         let last: { ok: false; error: string } | null = null;
         for (const id of ids) {
             try {
-                const prep = await prepareStatement(kind, id, '', '');
+                const prep = await prepareStatement(kind, id, from, to);
                 if (!prep.ok) { last = prep; continue; }
                 const parsed = JSON.parse(await runJob(prep.job));
                 if (parsed.error) { last = { ok: false, error: parsed.error }; continue; }
@@ -119,6 +120,19 @@ export default function CustomerStatementScreen() {
         }
         setBuilding(false);
         setError(last ? last.error : 'Could not build the statement.');
+    };
+
+    const pickCustomer = async (c: Customer) => {
+        setCustomer(c);
+        setQuery(c.customer_name || c.name);
+        setResults([]);
+        await buildFor(c, fy);
+    };
+
+    const toggleFy = () => {
+        const next = fy === 'fy2025' ? 'current' : 'fy2025';
+        setFy(next);
+        if (customer) buildFor(customer, next);
     };
 
     const chooseAnotherCustomer = () => {
@@ -164,16 +178,23 @@ export default function CustomerStatementScreen() {
 
             <ScreenHeader
                 title={title}
-                subtitle={customer ? (customer.customer_name || customer.name) : 'Choose a customer'}
+                subtitle={customer ? `${customer.customer_name || customer.name}${kind === 'ledger' && fy === 'fy2025' ? ' · FY 2025-26' : ''}` : 'Choose a customer'}
                 onBack={onBack}
-                right={doc ? (
+                right={customer || doc ? (
                     <View style={styles.headerActions}>
+                        {kind === 'ledger' && customer && (
+                            <TouchableOpacity style={styles.fyBtn} onPress={toggleFy} accessibilityLabel="Ledger for FY 2025-26">
+                                <Text style={styles.fyBtnText}>{fy === 'fy2025' ? 'Current FY' : '2025-26'}</Text>
+                            </TouchableOpacity>
+                        )}
+                        {doc && (<>
                         <TouchableOpacity style={styles.headerBtn} onPress={share} accessibilityLabel="Share PDF">
                             <Ionicons name="share-outline" size={20} color="#FFF" />
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.headerBtn} onPress={save} accessibilityLabel="Download PDF">
                             <Ionicons name="download-outline" size={20} color="#FFF" />
                         </TouchableOpacity>
+                        </>)}
                     </View>
                 ) : undefined}
             />
@@ -236,6 +257,9 @@ export default function CustomerStatementScreen() {
                         </TouchableOpacity>
                     ))}
 
+                    {!query.trim() && (
+                        <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 8 }]}>Type a customer name or ID to search.</Text>
+                    )}
                 </ScrollView>
             )}
         </View>
@@ -245,6 +269,8 @@ export default function CustomerStatementScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1 },
     headerActions: { flexDirection: 'row', gap: 8 },
+    fyBtn: { paddingHorizontal: 12, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center' },
+    fyBtnText: { color: '#FFF', fontWeight: '800', fontSize: 13 },
     headerBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
     hint: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
