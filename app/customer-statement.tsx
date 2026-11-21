@@ -126,7 +126,9 @@ export default function CustomerStatementScreen() {
         setCustomer(c);
         setQuery(c.customer_name || c.name);
         setResults([]);
-        await buildFor(c, fy);
+        // A new customer always opens on the current year; FY 2025-26 is chosen again if needed.
+        setFy('current');
+        await buildFor(c, 'current');
     };
 
     const toggleFy = () => {
