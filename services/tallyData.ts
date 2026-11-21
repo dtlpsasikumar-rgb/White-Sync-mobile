@@ -9,7 +9,7 @@ import * as SecureStore from 'expo-secure-store';
 import { apiUrl } from '@/constants/config';
 import { apiGet } from '@/utils/api';
 
-export const STOCK_BRANDS = ['Precitex', 'Habasit', 'Inspiron', 'Supreme', 'Sterling', 'Velplast', 'Aristo', 'Brite', 'Borgosesia'];
+export const STOCK_BRANDS = ['Precitex', 'Habasit', 'Inspiron', 'Supreme', 'Sterling', 'Velplast', 'Aristo', 'Brite', 'Borgosesia', 'White & Co', 'RMP', 'Sintex'];
 export const STOCK_TARGET_WAREHOUSE = 'Stores - W&C';
 export const PAY_BANK_NAME = 'ICICI BANK - 47963';
 

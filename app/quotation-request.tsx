@@ -24,6 +24,7 @@ export default function QuotationRequestScreen() {
     const theme = useColorScheme() ?? 'light';
     const colors = Colors[theme];
     const nextKey = useRef(2);
+    const formScrollRef = useRef<ScrollView>(null);
 
     const newLine = (key: number): Line => ({ key, item: null, query: '', results: [], qty: '' });
 
@@ -103,9 +104,10 @@ export default function QuotationRequestScreen() {
             // The draft is saved; now email it to the sales-cbe account from the logged-in user's address.
             const senderName = (await SecureStore.getItemAsync('user_name')) || '';
             const typeLabel = type === 'quotation' ? 'Quotation' : 'Proforma';
-            // Running number for this phone's requests: 1, 2, 3 ...
-            const requestNo = (parseInt((await SecureStore.getItemAsync('quotation_request_no')) || '0', 10) || 0) + 1;
-            await SecureStore.setItemAsync('quotation_request_no', String(requestNo));
+            // Running number for this phone's requests, kept separately for quotations and proformas: 1, 2, 3 ...
+            const counterKey = type === 'quotation' ? 'quotation_request_no' : 'proforma_request_no';
+            const requestNo = (parseInt((await SecureStore.getItemAsync(counterKey)) || '0', 10) || 0) + 1;
+            await SecureStore.setItemAsync(counterKey, String(requestNo));
             let mailNote = '';
             if (!senderEmail) {
                 mailNote = 'Email not sent: your user email is not known. Log out and log in again.';
@@ -194,7 +196,11 @@ export default function QuotationRequestScreen() {
                     ))}
                 </View>
             ) : (
-                <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                    ref={formScrollRef}
+                    contentContainerStyle={[styles.pad, { paddingBottom: 320 }]}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <Text style={label}>Customer</Text>
                     {customer ? (
                         <TouchableOpacity style={[styles.selected, { borderColor: colors.primary, backgroundColor: colors.primarySoft }]} onPress={() => { setCustomer(null); setCustomerQuery(''); }}>
@@ -247,6 +253,7 @@ export default function QuotationRequestScreen() {
                                 placeholderTextColor={colors.textSecondary}
                                 value={specialInstructions}
                                 onChangeText={setSpecialInstructions}
+                                onFocus={() => setTimeout(() => formScrollRef.current?.scrollToEnd({ animated: true }), 350)}
                                 multiline
                             />
                         </>

@@ -135,7 +135,7 @@ export async function emailQuotationToSales(p: {
         .join('');
     const content =
         `<p>Dear Sir/Madam,</p>` +
-        `<p>Please send a quotation for the following item(s).</p>` +
+        `<p>Please send a ${p.typeLabel === 'Proforma' ? 'proforma' : 'quotation'} for the following item(s).</p>` +
         `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>S.No</th><th>Item</th><th>Qty</th></tr>${itemRows}</table>` +
         `<p>Customer: <b>${esc(p.customerLabel)}</b><br>Date: ${date}</p>` +
         (p.specialInstructions
@@ -149,7 +149,7 @@ export async function emailQuotationToSales(p: {
         recipients: SALES_CBE_EMAIL,
         sender: p.senderEmail,
         sender_full_name: p.senderName || p.senderEmail,
-        subject: `Quotation Request ${p.requestNo} on ${date} from ${p.customerLabel}`,
+        subject: `${p.typeLabel} Request ${p.requestNo} on ${date} from ${p.customerLabel}`,
         content,
         communication_medium: 'Email',
         send_email: 1,
