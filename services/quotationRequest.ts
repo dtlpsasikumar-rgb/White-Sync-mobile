@@ -96,6 +96,8 @@ export async function createRequestDraft(p: {
         brand: p.brand,
         status: 'Draft',
         ...(p.approverEmail ? { quotation_approver: p.approverEmail } : {}),
+        // A draft with no items needs zero totals, or ERP's payment schedule cannot be worked out.
+        ...(p.lines.length === 0 ? { total: 0, net_total: 0, grand_total: 0, base_total: 0, base_net_total: 0, base_grand_total: 0, rounded_total: 0, base_rounded_total: 0, total_taxes_and_charges: 0, base_total_taxes_and_charges: 0 } : {}),
         ...(p.specialInstructions ? { custom_special_instructions: p.specialInstructions } : {}),
         items: p.lines.map(l => ({ item_code: l.item.item_code, item_name: l.item.item_name, qty: l.qty, uom: l.item.stock_uom, brand: p.brand })),
     };
@@ -107,11 +109,16 @@ export async function createRequestDraft(p: {
     return name;
 }
 
+/** Brand name as written in mail subjects (ERP codes such as WHITENCO are shown as they are called in the business). */
+const BRAND_LABELS: Record<string, string> = { WHITENCO: 'White & Co', RMP: 'RMP' };
+export const brandLabel = (brand: string) =>
+    BRAND_LABELS[brand] || brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase();
+
 /** Address that receives every mobile quotation request. */
-export const SALES_CBE_EMAIL = 'sales-cbe@whitenco.net';
+export const HOS_EMAIL = 'hos@whitenco.net';
 
 /**
- * Emails a saved Draft to the sales-cbe account, using ERP's own mail sender and
+ * Emails a saved Draft to the HOS address, using ERP's own mail sender and
  * the outgoing account ERP has set up. The mobile user's email goes in as the sender.
  * Throws with the reason if ERP does not send it.
  */
@@ -122,6 +129,7 @@ export async function emailQuotationToSales(p: {
     senderEmail: string;
     senderName: string;
     typeLabel: string;
+    brand: string;
     customerLabel: string;
     lines: { item: RequestItem; qty: number }[];
     specialInstructions?: string;
@@ -135,8 +143,10 @@ export async function emailQuotationToSales(p: {
         .join('');
     const content =
         `<p>Dear Sir/Madam,</p>` +
-        `<p>Please send a ${p.typeLabel === 'Proforma' ? 'proforma' : 'quotation'} for the following item(s).</p>` +
-        `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>S.No</th><th>Item</th><th>Qty</th></tr>${itemRows}</table>` +
+        `<p>Please send a ${p.typeLabel === 'Proforma' ? 'proforma' : 'quotation'}${p.lines.length ? ' for the following item(s)' : ''}.</p>` +
+        (p.lines.length
+            ? `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>S.No</th><th>Item</th><th>Qty</th></tr>${itemRows}</table>`
+            : '') +
         `<p>Customer: <b>${esc(p.customerLabel)}</b><br>Date: ${date}</p>` +
         (p.specialInstructions
             ? `<p><b>Special Instructions:</b><br>${esc(p.specialInstructions).replace(/\n/g, '<br>')}</p>`
@@ -146,10 +156,10 @@ export async function emailQuotationToSales(p: {
     const body = {
         doctype: 'Quotation',
         name: p.name,
-        recipients: SALES_CBE_EMAIL,
+        recipients: HOS_EMAIL,
         sender: p.senderEmail,
         sender_full_name: p.senderName || p.senderEmail,
-        subject: `${p.typeLabel} Request ${p.requestNo} on ${date} from ${p.customerLabel}`,
+        subject: `${brandLabel(p.brand)} ${p.typeLabel} Request ${p.requestNo} on ${date} from ${p.senderName || p.senderEmail}`,
         content,
         communication_medium: 'Email',
         send_email: 1,

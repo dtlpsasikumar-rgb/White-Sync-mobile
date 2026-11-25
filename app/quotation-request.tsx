@@ -79,17 +79,14 @@ export default function QuotationRequestScreen() {
             Alert.alert('Missing details', 'Choose the brand and customer.');
             return;
         }
-        if (lines.some(l => !l.item)) {
-            Alert.alert('Missing item', 'Choose an item for every line, or remove the empty line.');
-            return;
-        }
-        if (lines.some(l => !(Number(l.qty) > 0))) {
+        if (lines.some(l => l.item && !(Number(l.qty) > 0))) {
             Alert.alert('Quantity', 'Enter a quantity greater than zero for every item.');
             return;
         }
         setSaving(true);
         try {
-            const lineList = lines.map(l => ({ item: l.item as RequestItem, qty: Number(l.qty) }));
+            // Lines with no item are left out; a request can be saved with no items.
+            const lineList = lines.filter(l => l.item).map(l => ({ item: l.item as RequestItem, qty: Number(l.qty) }));
             const senderEmail = (await SecureStore.getItemAsync('user_id')) || '';
             const name = await createRequestDraft({
                 type,
@@ -101,7 +98,7 @@ export default function QuotationRequestScreen() {
                 approverEmail: senderEmail || undefined,
                 specialInstructions: specialInstructions.trim() || undefined,
             });
-            // The draft is saved; now email it to the sales-cbe account from the logged-in user's address.
+            // The draft is saved; now email it to the HOS address from the logged-in user's address.
             const senderName = (await SecureStore.getItemAsync('user_name')) || '';
             const typeLabel = type === 'quotation' ? 'Quotation' : 'Proforma';
             // Running number for this phone's requests, kept separately for quotations and proformas: 1, 2, 3 ...
@@ -121,9 +118,10 @@ export default function QuotationRequestScreen() {
                         typeLabel,
                         customerLabel: customer.customer_name || customer.name,
                         lines: lineList,
+                        brand,
                         specialInstructions: specialInstructions.trim() || undefined,
                     });
-                    mailNote = 'Emailed to sales-cbe@whitenco.net.';
+                    mailNote = 'Emailed to hos@whitenco.net.';
                 } catch (e: any) {
                     mailNote = `Saved, but the email was not sent: ${e?.message || 'unknown error'}`;
                 }

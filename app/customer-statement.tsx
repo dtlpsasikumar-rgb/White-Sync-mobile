@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +37,10 @@ export default function CustomerStatementScreen() {
     const colors = Colors[theme];
     const { s, vs, ms } = useResponsive();
     const insets = useSafeAreaInsets();
+    // Financial year (1 April to 31 March) of today's date, e.g. 2026-27.
+    const today = localTodayIso();
+    const fyStartYear = parseInt(today.slice(0, 4), 10) - (parseInt(today.slice(5, 7), 10) < 4 ? 1 : 0);
+    const currentFy = `${fyStartYear}-${String(fyStartYear + 1).slice(2)}`;
 
     const [query, setQuery] = useState('');
     const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
@@ -49,6 +53,7 @@ export default function CustomerStatementScreen() {
     const [error, setError] = useState<string | null>(null);
     // Ledger period: this financial year, or FY 2025-26 (1 Apr 2025 to 31 Mar 2026).
     const [fy, setFy] = useState<'current' | 'fy2025'>('current');
+    const [fyOpen, setFyOpen] = useState(false);
 
     // Customers with sales invoices from 1 January 2024 onwards (the same names the
     // Sales Invoice History filter uses).
@@ -131,8 +136,10 @@ export default function CustomerStatementScreen() {
         await buildFor(c, 'current');
     };
 
-    const toggleFy = () => {
-        const next = fy === 'fy2025' ? 'current' : 'fy2025';
+    // Picks the ledger's financial year from the menu and rebuilds the statement for this customer.
+    const chooseFy = (next: 'current' | 'fy2025') => {
+        setFyOpen(false);
+        if (next === fy) return;
         setFy(next);
         if (customer) buildFor(customer, next);
     };
@@ -185,8 +192,9 @@ export default function CustomerStatementScreen() {
                 right={customer || doc ? (
                     <View style={styles.headerActions}>
                         {kind === 'ledger' && customer && (
-                            <TouchableOpacity style={styles.fyBtn} onPress={toggleFy} accessibilityLabel="Ledger for FY 2025-26">
-                                <Text style={styles.fyBtnText}>{fy === 'fy2025' ? 'Current FY' : '2025-26'}</Text>
+                            <TouchableOpacity style={styles.fyBtn} onPress={() => setFyOpen(true)} accessibilityLabel="Choose financial year">
+                                <Text style={styles.fyBtnText}>{fy === 'fy2025' ? '2025-26' : currentFy}</Text>
+                                <Ionicons name="chevron-down" size={14} color="#FFF" />
                             </TouchableOpacity>
                         )}
                         {doc && (<>
@@ -200,6 +208,20 @@ export default function CustomerStatementScreen() {
                     </View>
                 ) : undefined}
             />
+
+            <Modal visible={fyOpen} transparent animationType="fade" onRequestClose={() => setFyOpen(false)}>
+                <TouchableOpacity style={styles.fyOverlay} activeOpacity={1} onPress={() => setFyOpen(false)}>
+                    <View style={[styles.fyMenu, Shadow.card(theme), { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                        <Text style={[styles.fyMenuTitle, { color: colors.textSecondary }]}>Financial year</Text>
+                        {([['current', `${currentFy} (current)`], ['fy2025', '2025-26']] as const).map(([key, text]) => (
+                            <TouchableOpacity key={key} style={styles.fyOption} onPress={() => chooseFy(key)}>
+                                <Text style={[styles.fyOptionText, { color: fy === key ? colors.primary : colors.text }]}>{text}</Text>
+                                {fy === key && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </TouchableOpacity>
+            </Modal>
 
             {job && (
                 <WebView
@@ -271,8 +293,13 @@ export default function CustomerStatementScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1 },
     headerActions: { flexDirection: 'row', gap: 8 },
-    fyBtn: { paddingHorizontal: 12, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center' },
+    fyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center' },
     fyBtnText: { color: '#FFF', fontWeight: '800', fontSize: 13 },
+    fyOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
+    fyMenu: { width: 240, borderRadius: Radius.md, borderWidth: 1, padding: 8 },
+    fyMenuTitle: { fontSize: 12, fontWeight: '800', padding: 8, textTransform: 'uppercase' },
+    fyOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12 },
+    fyOptionText: { fontSize: 15, fontWeight: '700' },
     headerBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
     hint: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
