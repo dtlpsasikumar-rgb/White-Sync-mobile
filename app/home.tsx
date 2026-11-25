@@ -516,6 +516,7 @@ export default function HomeScreen() {
                         <SectionHeader title="Quick Navigation" subtitle="Tap a section to open it" icon="apps" />
                         <View style={styles.navSection}>
                             {([
+                                { label: 'TEAM CHAT', sub: 'Jobs & messages with the office', icon: 'chatbubbles', from: '#6EE7B7', to: '#059669', route: '/team', mode: 'push' as const },
                                 { label: 'CUSTOMER VISIT PLANNED', sub: 'Field visit records', icon: 'calendar', from: '#A78BFA', to: '#7C3AED', route: '/maintenance', mode: 'replace' as const },
                                 { label: 'QUOTATION / PROFORMA REQUEST', sub: 'Brand, customer, item & quantity', icon: 'create', from: '#FCD34D', to: '#EA580C', route: '/quotation-request', mode: 'push' as const },
                                 { label: 'QUOTATION CREATED', sub: 'Create & track quotations', icon: 'document-text', from: '#FBBF24', to: '#F97316', route: '/quotations', mode: 'replace' as const },

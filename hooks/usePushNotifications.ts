@@ -8,6 +8,7 @@ import Constants from 'expo-constants';
 import { notificationService } from '../services/NotificationService';
 import { apiPost } from '../utils/api';
 import { apiUrl } from '../constants/config';
+import { notificationTarget } from '../utils/notificationTarget';
 
 /**
  * Registers this device's Expo push token against the logged-in ERPNext
@@ -133,17 +134,17 @@ export const usePushNotifications = () => {
             setNotification(notification);
         });
 
-        // Tapping a notification navigates to the quotation. The same response can
+        // Tapping a notification opens its quotation, or its Team job. The same response can
         // arrive from both the listener and the cold-start lookup, so open it once.
         let handledResponseId: string | null = null;
         const openFromResponse = (response: Notifications.NotificationResponse | null) => {
             if (!response) return;
             const key = response.notification.request.identifier;
             if (key === handledResponseId) return;
-            const data = response.notification.request.content.data;
-            if (data && data.id) {
+            const target = notificationTarget(response.notification.request.content.data);
+            if (target) {
                 handledResponseId = key;
-                router.push({ pathname: '/quotations/[id]', params: { id: data.id as string } });
+                router.push(target);
             }
         };
         responseListener.current = Notifications.addNotificationResponseReceivedListener(openFromResponse);
