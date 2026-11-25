@@ -145,8 +145,13 @@ async function signIn(): Promise<string | null> {
         smartopsUrl('/bff/v1/login/erpnext'), { sid }, null, { 'X-Client': 'mobile' });
     const token = res.ok ? res.data?.session_token : null;
     if (token) await SecureStore.setItemAsync(TOKEN_KEY, JSON.stringify({ sid, token }));
+    // Why sign-in failed is what the person needs to see ("x@y is not linked to a SmartOps
+    // staff member yet"), not the 401 of the call that triggered it.
+    signInRefusal = token ? null : { status: res.status, error: why(res.status, res.data) };
     return token ?? null;
 }
+
+let signInRefusal: { status: number; error: string } | null = null;
 
 let signingIn: Promise<string | null> | null = null;
 
@@ -185,6 +190,7 @@ async function call<T>(send: (headers: Record<string, string>) => Promise<{ ok: 
     if (res.status === 401) {
         const t = await token(true);
         if (t) res = await send({ 'X-Client': 'mobile', Authorization: `Bearer ${t}` });
+        else if (signInRefusal) return { ok: false, ...signInRefusal };
     }
     return res.ok ? { ok: true, data: res.data as T } : { ok: false, status: res.status, error: why(res.status, res.data) };
 }
