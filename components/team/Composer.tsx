@@ -1,7 +1,7 @@
 /**
  * The message box at the bottom of a Team chat, WhatsApp-style: attach, type, camera, send.
  *
- * Chips above the box are shortcuts. An `insert` chip starts the message ("Gayathri, ") --
+ * Chips above the box are shortcuts. An `insert` chip starts the message ("Ravi, ") --
  * SmartOps reads who a post is for from the name it starts with. A `send` chip sends at
  * once ("Done ✅" closes a job given to you).
  */

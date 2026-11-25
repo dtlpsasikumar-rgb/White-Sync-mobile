@@ -12,7 +12,7 @@ export function personColor(name: string | null | undefined): string {
     return PERSON_COLORS[h % PERSON_COLORS.length];
 }
 
-/** "Gayathri R" -> "GR"; an email -> its first two letters. */
+/** "Ravi K" -> "RK"; an email -> its first two letters. */
 export function initials(name: string | null | undefined): string {
     const clean = (name || '?').split('@')[0].replace(/[._-]+/g, ' ').trim();
     const parts = clean.split(/\s+/).filter(Boolean);

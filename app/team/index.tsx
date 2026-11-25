@@ -246,7 +246,7 @@ function EmptyChat({ colors }: { colors: typeof Colors.light }) {
             </View>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>Post the first job</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                {'Start with the person\'s name and say what is needed — "Gayathri, kindly send the pro-forma to …". Add a photo of the PO with the camera. SmartOps works out the job and who it is for.'}
+                {'Start with the person\'s name and say what is needed — "Ravi, kindly send the pro-forma to …". Add a photo of the PO with the camera. SmartOps works out the job and who it is for.'}
             </Text>
         </View>
     );
