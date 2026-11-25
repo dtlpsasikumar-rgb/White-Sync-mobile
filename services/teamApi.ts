@@ -37,6 +37,9 @@ export interface Attachment {
     status?: string | null;
     ref?: string | null;
     party?: string | null;
+    /** The read ENDED with nothing read — not "still reading". `team.reread` tries again.
+     * Absent from an older SmartOps, which is treated as "not failed". */
+    read_failed?: boolean;
     file_url: string;
 }
 
@@ -220,6 +223,9 @@ export const team = {
     reply: (id: string, body: string, file?: PickedFile | null) =>
         call<JobDetail>(h => apiPostForm(smartopsUrl(`/bff/v1/team/jobs/${id}/replies`), form(body, file), h)),
     done: (id: string) => post<JobDetail>(`/bff/v1/team/jobs/${id}/done`),
+    /** Read a photo/PDF on this job again, after a read that failed. */
+    reread: (id: string, documentId: string) =>
+        post<JobDetail>(`/bff/v1/team/jobs/${id}/reread`, { document_id: documentId }),
     reopen: (id: string) => post<JobDetail>(`/bff/v1/team/jobs/${id}/reopen`),
     cancel: (id: string) => post<JobDetail>(`/bff/v1/team/jobs/${id}/cancel`),
     correct: (id: string, change: { kind?: JobKind; assignee_id?: string }) =>

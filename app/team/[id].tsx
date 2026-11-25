@@ -26,7 +26,6 @@ import { dayLabel, displayName, sameDay } from '@/components/team/chatUi';
 import { Composer, ComposerChip } from '@/components/team/Composer';
 import { PickerSheet } from '@/components/team/PickerSheet';
 import { Sheet } from '@/components/team/Sheet';
-import { readLine } from '@/components/team/TeamImage';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Radius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -61,6 +60,7 @@ export default function JobScreen() {
     const [busy, setBusy] = useState(false);
     const [picker, setPicker] = useState<'kind' | 'assignee' | null>(null);
     const [step, setStep] = useState(false);
+    const [rereading, setRereading] = useState<string | null>(null);
     const scrollRef = useRef<ScrollViewInstance>(null);
 
     const load = useCallback(async () => {
@@ -123,6 +123,12 @@ export default function JobScreen() {
         return ok;
     };
 
+    const readAgain = async (documentId: string) => {
+        setRereading(documentId);
+        await act(() => team.reread(job.id, documentId));
+        setRereading(null);
+    };
+
     const menu = () => Alert.alert('Job', `${job.kind_label} · ${displayName(job.author.name)} → ${job.assignee ? displayName(job.assignee.name) : 'nobody yet'}`, [
         open ? { text: 'Mark done', onPress: () => act(() => team.done(job.id)) }
             : { text: 'Reopen', onPress: () => act(() => team.reopen(job.id)) },
@@ -179,12 +185,8 @@ export default function JobScreen() {
                             <React.Fragment key={m.id}>
                                 {newDay && <DayDivider label={dayLabel(m.created_at)} colors={colors} />}
                                 <ReplyBubble reply={m} mine={!!me && m.author?.id === me} showAuthor={!grouped}
-                                    theme={theme} colors={colors} />
-                                {i === 0 && !!job.attachment && !!readLine(job.attachment) && (
-                                    <Text style={[styles.read, { color: colors.textSecondary }, me === job.author.id ? { textAlign: 'right' } : null]}>
-                                        {readLine(job.attachment)}
-                                    </Text>
-                                )}
+                                    theme={theme} colors={colors} onRetryRead={readAgain}
+                                    retrying={!!m.attachment && rereading === m.attachment.document_id} />
                             </React.Fragment>
                         );
                     })}
@@ -365,7 +367,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12, paddingVertical: 9,
     },
     linkedText: { flex: 1, fontWeight: '700', fontSize: 13.5 },
-    read: { fontSize: 11.5, fontWeight: '600', paddingHorizontal: 50, marginTop: 2 },
     input: { borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
     save: { borderRadius: Radius.md, paddingVertical: 14, alignItems: 'center' },
     saveText: { color: '#FFF', fontWeight: '900', fontSize: 15 },

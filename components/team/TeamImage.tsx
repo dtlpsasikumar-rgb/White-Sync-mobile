@@ -69,6 +69,7 @@ function Viewer({ visible, source, onClose }: { visible: boolean; source: Source
 
 /** What SmartOps read from the photo, in one quiet line ("Read as: purchase order · PO-112"). */
 export function readLine(a: Attachment): string {
+    if (a.read_failed) return "Couldn't read it";
     if (a.status === 'received' || !a.status) return 'SmartOps is reading it…';
     const read = [a.kind && a.kind !== 'unknown' ? a.kind.replace(/_/g, ' ') : null, a.ref, a.party].filter(Boolean).join(' · ');
     return read ? `Read as: ${read}` : '';

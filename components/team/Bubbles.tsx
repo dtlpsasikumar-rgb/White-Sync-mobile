@@ -5,11 +5,11 @@
  */
 
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, Radius } from '@/constants/theme';
-import { age, Job, KIND_COLORS, KIND_ICONS, Reply } from '@/services/teamApi';
+import { age, Attachment, Job, KIND_COLORS, KIND_ICONS, Reply } from '@/services/teamApi';
 import { Avatar } from './Avatar';
 import { displayName, personColor, timeOnly } from './chatUi';
 import { readLine, TeamImage } from './TeamImage';
@@ -113,7 +113,11 @@ export function JobBubble({ job, mine, showAuthor, meId, theme, colors, onPress 
             {!!job.attachment && (
                 <View style={{ gap: 4 }}>
                     <TeamImage a={job.attachment} colors={colors} width={width} />
-                    {!!readLine(job.attachment) && <Text style={[styles.read, { color: colors.textSecondary }]}>{readLine(job.attachment)}</Text>}
+                    {!!readLine(job.attachment) && (
+                        <Text style={[styles.read, { color: job.attachment.read_failed ? colors.warning : colors.textSecondary }]}>
+                            {readLine(job.attachment)}{job.attachment.read_failed ? ' — open the job to try again' : ''}
+                        </Text>
+                    )}
                 </View>
             )}
             {!!job.body && (
@@ -139,14 +143,17 @@ export function JobBubble({ job, mine, showAuthor, meId, theme, colors, onPress 
 }
 
 /** One message in a job's thread. A reply with no author is SmartOps itself. */
-export function ReplyBubble({ reply, mine, showAuthor, theme, colors }: {
+export function ReplyBubble({ reply, mine, showAuthor, theme, colors, onRetryRead, retrying }: {
     reply: Reply; mine: boolean; showAuthor: boolean; theme: 'light' | 'dark'; colors: ThemeColors;
+    /** Offered under a photo/PDF whose read failed. */
+    onRetryRead?: (documentId: string) => void; retrying?: boolean;
 }) {
     const width = useBubbleWidth() - 16;
     if (!reply.author) return <SystemNote text={reply.body} colors={colors} />;
     return (
         <Shell mine={mine} showAuthor={showAuthor} authorName={reply.author.name} theme={theme} colors={colors}>
             {!!reply.attachment && <TeamImage a={reply.attachment} colors={colors} width={width} />}
+            {!!reply.attachment && <ReadState a={reply.attachment} colors={colors} onRetry={onRetryRead} retrying={retrying} />}
             {!!reply.body && <Text style={[styles.body, { color: colors.text }]}>{reply.body}</Text>}
             <View style={styles.footer}>
                 {reply.closed_job
@@ -155,6 +162,28 @@ export function ReplyBubble({ reply, mine, showAuthor, theme, colors }: {
                 <Meta time={reply.created_at} colors={colors} />
             </View>
         </Shell>
+    );
+}
+
+/** What SmartOps made of a photo/PDF, and — when the read failed — a way to try again. */
+function ReadState({ a, colors, onRetry, retrying }: {
+    a: Attachment; colors: ThemeColors; onRetry?: (documentId: string) => void; retrying?: boolean;
+}) {
+    const line = readLine(a);
+    if (!line) return null;
+    if (!a.read_failed || !onRetry) {
+        return <Text style={[styles.read, { color: a.read_failed ? colors.warning : colors.textSecondary }]}>{line}</Text>;
+    }
+    return (
+        <TouchableOpacity disabled={retrying} onPress={() => onRetry(a.document_id)} activeOpacity={0.8}
+            style={[styles.retry, { borderColor: `${colors.warning}66`, backgroundColor: `${colors.warning}14` }]}>
+            {retrying
+                ? <ActivityIndicator size="small" color={colors.warning} />
+                : <Ionicons name="refresh" size={15} color={colors.warning} />}
+            <Text style={[styles.retryText, { color: colors.warning }]}>
+                {retrying ? 'Reading it again…' : "Couldn't read it — try again"}
+            </Text>
+        </TouchableOpacity>
     );
 }
 
@@ -200,6 +229,11 @@ const styles = StyleSheet.create({
     replies: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     repliesText: { fontSize: 12.5, fontWeight: '800' },
     closed: { fontSize: 12, fontWeight: '800' },
+    retry: {
+        flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderWidth: 1,
+        borderRadius: Radius.pill, paddingHorizontal: 10, paddingVertical: 6,
+    },
+    retryText: { fontSize: 12.5, fontWeight: '800' },
     meta: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 'auto' },
     time: { fontSize: 11, fontWeight: '600' },
     system: {
