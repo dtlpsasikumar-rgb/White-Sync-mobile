@@ -4,7 +4,7 @@ import * as Device from 'expo-device';
 import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { notificationService } from '../services/NotificationService';
 import { apiPost } from '../utils/api';
 import { apiUrl } from '../constants/config';
@@ -20,6 +20,12 @@ import { notificationTarget } from '../utils/notificationTarget';
 async function registerForPushNotificationsAsync(): Promise<string | undefined> {
     if (!Device.isDevice) {
         console.log('[usePushNotifications] Not a physical device, skipping');
+        return undefined;
+    }
+    // Expo Go has no remote push on Android (removed in SDK 53): asking for a token there
+    // throws, and the retry loop below would show that error every few seconds.
+    if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+        console.log('[usePushNotifications] Running in Expo Go, no remote push; skipping');
         return undefined;
     }
 

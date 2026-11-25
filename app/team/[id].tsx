@@ -1,32 +1,53 @@
 /**
- * One job: what was asked, the photo, the ERPNext step for its type, and the thread.
+ * One job as a chat thread: the post at the top, the replies under it, the message box at
+ * the bottom — plus a bar pinned under the header with what the job is, whom it is for,
+ * and its ERPNext step.
  *
  * The ERPNext step depends on the type (see SmartOps app/web/team_erpnext.py):
  *   pro-forma / quotation  make a DRAFT Quotation (closes itself when approved in ERPNext)
  *   place order            type the principal's order number (closes the job)
  *   dispatch               transporter + LR number (closes the job)
  *   payment                find the Tally receipt and confirm it (closes the job)
+ *
+ * One-tap replies say the words SmartOps already reads as "done" ("Order placed",
+ * "Dispatched", …), so the person the job is for can close it without typing.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput,
-    TouchableOpacity, View,
+    TouchableOpacity, View, type ScrollViewInstance,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { pickAttachment } from '@/components/team/Attach';
+import { DayDivider, JobTag, ReplyBubble } from '@/components/team/Bubbles';
+import { dayLabel, displayName, sameDay } from '@/components/team/chatUi';
+import { Composer, ComposerChip } from '@/components/team/Composer';
 import { PickerSheet } from '@/components/team/PickerSheet';
+import { Sheet } from '@/components/team/Sheet';
+import { readLine } from '@/components/team/TeamImage';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
-import { Colors } from '@/constants/theme';
+import { Colors, Radius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
-    age, Attachment, JobDetail, JobKind, KIND_COLORS, Payments, People, PickedFile, shortTime, team,
+    age, Job, JobDetail, JobKind, KIND_COLORS, Payments, People, PickedFile, Reply, team,
 } from '@/services/teamApi';
 
-const POLL_MS = 15000;
+const POLL_MS = 10000;
+const GROUP_GAP_MS = 10 * 60 * 1000;
+
+/** What the person a job is for says when it is done — words SmartOps closes the job on. */
+const DONE_WORDS: Record<JobKind, string> = {
+    proforma: 'Pro-forma sent ✅',
+    quotation: 'Quotation sent ✅',
+    place_order: 'Order placed ✅',
+    dispatch: 'Dispatched ✅',
+    payment: 'Payment received ✅',
+    general: 'Done ✅',
+};
+
+type Result = { ok: true; data: JobDetail } | { ok: false; error: string };
 
 export default function JobScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -38,12 +59,9 @@ export default function JobScreen() {
     const [people, setPeople] = useState<People | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
-    const [reply, setReply] = useState('');
-    const [replyFile, setReplyFile] = useState<PickedFile | null>(null);
-    const [sheet, setSheet] = useState<'kind' | 'assignee' | null>(null);
-    const [reference, setReference] = useState('');
-    const [transporter, setTransporter] = useState('');
-    const [payments, setPayments] = useState<Payments | null>(null);
+    const [picker, setPicker] = useState<'kind' | 'assignee' | null>(null);
+    const [step, setStep] = useState(false);
+    const scrollRef = useRef<ScrollViewInstance>(null);
 
     const load = useCallback(async () => {
         const r = await team.job(id);
@@ -56,273 +74,306 @@ export default function JobScreen() {
         const t = setInterval(load, POLL_MS);
         return () => clearInterval(t);
     }, [load]));
-    useEffect(() => { if (detail?.job.transporter && !transporter) setTransporter(detail.job.transporter); }, [detail, transporter]);
 
     /** Run one change; show what SmartOps said if it refused. */
-    const act = async (fn: () => Promise<{ ok: true; data: JobDetail } | { ok: false; error: string }>) => {
+    const act = useCallback(async (fn: () => Promise<Result>) => {
         setBusy(true);
         const r = await fn();
         setBusy(false);
         if (r.ok) setDetail(r.data); else Alert.alert('Team', r.error);
         return r.ok;
-    };
+    }, []);
 
-    if (!detail) {
+    const me = people?.me.id;
+    const job = detail?.job;
+
+    const chips: ComposerChip[] = useMemo(() => {
+        if (!job || job.status !== 'open') return [];
+        if (me && job.assignee?.id === me) {
+            return [
+                { label: DONE_WORDS[job.kind], send: DONE_WORDS[job.kind], color: colors.success },
+                { label: '👍 On it', send: 'On it 👍' },
+                { label: '❓ Need details', send: 'Need more details, please' },
+            ];
+        }
+        if (me && job.author.id === me) {
+            return [
+                { label: 'Any update?', send: 'Any update?' },
+                { label: '🙏 Thanks', send: 'Thanks 🙏' },
+            ];
+        }
+        return [];
+    }, [job, me, colors.success]);
+
+    if (!detail || !job) {
         return (
             <View style={[styles.center, { backgroundColor: colors.background }]}>
-                {error ? <Text style={{ color: colors.danger, fontWeight: '700', padding: 24, textAlign: 'center' }}>{error}</Text>
+                {error ? <Text style={[styles.err, { color: colors.danger }]}>{error}</Text>
                     : <ActivityIndicator color={colors.primary} />}
             </View>
         );
     }
 
-    const { job, thread } = detail;
-    const me = people?.me.id;
     const open = job.status === 'open';
-    const tint = KIND_COLORS[job.kind];
     const mayAct = me === job.author.id || me === job.assignee?.id;
 
-    const sendReply = async () => {
-        if (!reply.trim() && !replyFile) return;
-        const ok = await act(() => team.reply(job.id, reply.trim(), replyFile));
-        if (ok) { setReply(''); setReplyFile(null); }
+    const reply = async (text: string, file: PickedFile | null) => {
+        const ok = await act(() => team.reply(job.id, text, file));
+        if (ok) setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+        return ok;
     };
 
-    const findPayments = async () => {
-        setBusy(true);
-        const r = await team.payments(job.id);
-        setBusy(false);
-        if (r.ok) setPayments(r.data); else Alert.alert('Payment', r.error);
+    const menu = () => Alert.alert('Job', `${job.kind_label} · ${displayName(job.author.name)} → ${job.assignee ? displayName(job.assignee.name) : 'nobody yet'}`, [
+        open ? { text: 'Mark done', onPress: () => act(() => team.done(job.id)) }
+            : { text: 'Reopen', onPress: () => act(() => team.reopen(job.id)) },
+        { text: 'Change type', onPress: () => setPicker('kind') },
+        { text: 'Change who it is for', onPress: () => setPicker('assignee') },
+        ...(open && me === job.author.id ? [{ text: 'Cancel job', style: 'destructive' as const, onPress: () => act(() => team.cancel(job.id)) }] : []),
+        { text: 'Close', style: 'cancel' as const },
+    ]);
+
+    // The post itself opens the thread, as the first message.
+    const post: Reply = {
+        id: `post-${job.id}`, body: job.body, author: job.author, closed_job: false,
+        attachment: job.attachment, created_at: job.created_at,
     };
+    const messages = [post, ...detail.thread];
 
     return (
-        <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
             <ScreenHeader
-                title={job.kind_label}
-                subtitle={job.assignee ? `${job.author.name} → ${job.assignee.name}` : job.author.name}
+                title={displayName(job.author.name)}
+                subtitle={`${job.kind_label} · ${open ? `waiting ${age(job.age_minutes)}` : job.status === 'done' ? 'done' : 'cancelled'}`}
                 onBack={() => router.back()}
-                rightIcon="ellipsis-horizontal"
-                onRightPress={() => Alert.alert('Job', undefined, [
-                        open ? { text: 'Mark done', onPress: () => act(() => team.done(job.id)) }
-                            : { text: 'Reopen', onPress: () => act(() => team.reopen(job.id)) },
-                        ...(open && me === job.author.id ? [{ text: 'Cancel job', style: 'destructive' as const, onPress: () => act(() => team.cancel(job.id)) }] : []),
-                        { text: 'Close', style: 'cancel' as const },
-                    ])}
+                rightIcon="ellipsis-vertical"
+                onRightPress={menu}
             />
 
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 12 }} keyboardShouldPersistTaps="handled">
-                {/* What is asked, of whom */}
-                <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <View style={styles.rowBetween}>
-                        <TouchableOpacity onPress={() => setSheet('kind')} style={[styles.kindChip, { backgroundColor: tint }]}>
-                            <Text style={styles.kindText}>{job.kind_label}{job.kind_suggested ? ' ?' : ''}</Text>
-                            <Ionicons name="chevron-down" size={14} color="#FFF" />
-                        </TouchableOpacity>
-                        <Text style={{ color: open ? colors.textSecondary : colors.success, fontWeight: '800' }}>
-                            {open ? `waiting ${age(job.age_minutes)}` : job.status === 'done' ? `✓ Done${job.done_by ? ` by ${job.done_by.name}` : ''}` : 'Cancelled'}
-                        </Text>
-                    </View>
-                    {job.kind_suggested && (
-                        <Text style={[styles.note, { color: colors.warning }]}>SmartOps guessed this: {job.kind_why}. Tap the type to change it.</Text>
-                    )}
-                    <TouchableOpacity onPress={() => setSheet('assignee')} style={styles.assignee}>
-                        <Ionicons name="person-circle-outline" size={22} color={colors.textSecondary} />
-                        <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }}>
-                            {job.author.name} → {job.assignee ? job.assignee.name : 'choose who it is for'}
-                        </Text>
-                        <Ionicons name="swap-horizontal" size={18} color={colors.primary} />
-                    </TouchableOpacity>
-                    {!!job.body && <Text style={[styles.body, { color: colors.text }]}>{job.body}</Text>}
-                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{shortTime(job.created_at)}</Text>
-                    {!!job.attachment && <AttachmentView a={job.attachment} colors={colors} />}
-                </View>
-
-                {/* The ERPNext step for this type */}
-                {job.action !== 'none' && (
-                    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: tint }]}>
-                        <Text style={[styles.section, { color: tint }]}>ERPNext</Text>
-
-                        {job.action === 'quotation' && (job.erpnext_name && !job.erpnext_missing ? (
-                            <View style={{ gap: 6 }}>
-                                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{job.erpnext_name}</Text>
-                                <Text style={{ color: colors.textSecondary }}>
-                                    {open ? 'Draft made — send it for approval in ERPNext. This job closes when it is approved.' : 'Approved in ERPNext.'}
-                                </Text>
-                                <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.primary }]}
-                                    onPress={() => router.push({ pathname: '/quotations/[id]', params: { id: job.erpnext_name! } })}>
-                                    <Text style={{ color: colors.primary, fontWeight: '800' }}>Open the Quotation</Text>
-                                </TouchableOpacity>
-                            </View>
-                        ) : open && mayAct ? (
-                            <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: tint }]}
-                                onPress={() => router.push({ pathname: '/team/quotation', params: { id: job.id } })}>
-                                <Ionicons name="document-text-outline" size={20} color="#FFF" />
-                                <Text style={styles.primaryText}>Make draft {job.kind === 'proforma' ? 'pro-forma' : 'quotation'}</Text>
-                            </TouchableOpacity>
-                        ) : <Text style={{ color: colors.textSecondary }}>No Quotation yet.</Text>)}
-
-                        {(job.action === 'order_ref' || job.action === 'dispatch') && (job.reference ? (
-                            <Text style={{ color: colors.text, fontWeight: '700' }}>
-                                {job.action === 'order_ref' ? `Order no. ${job.reference}` : `${job.transporter || 'Transport'} — LR ${job.reference}`}
-                            </Text>
-                        ) : open && mayAct ? (
-                            <View style={{ gap: 10 }}>
-                                {job.action === 'dispatch' && (
-                                    <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                                        placeholder="Transporter" placeholderTextColor={colors.placeholder}
-                                        value={transporter} onChangeText={setTransporter} />
-                                )}
-                                <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                                    placeholder={job.action === 'order_ref' ? `${job.principal || 'Principal'} order no.` : 'LR no.'}
-                                    placeholderTextColor={colors.placeholder} value={reference} onChangeText={setReference} />
-                                <TouchableOpacity disabled={busy || !reference.trim()}
-                                    style={[styles.primaryBtn, { backgroundColor: tint, opacity: busy || !reference.trim() ? 0.5 : 1 }]}
-                                    onPress={() => act(() => job.action === 'order_ref'
-                                        ? team.orderRef(job.id, reference.trim())
-                                        : team.dispatch(job.id, reference.trim(), transporter.trim()))}>
-                                    <Text style={styles.primaryText}>Save and close the job</Text>
-                                </TouchableOpacity>
-                            </View>
-                        ) : <Text style={{ color: colors.textSecondary }}>No number yet.</Text>)}
-
-                        {job.action === 'payment' && (job.erpnext_name ? (
-                            <Text style={{ color: colors.text, fontWeight: '700' }}>Matched to Tally receipt {job.erpnext_name}</Text>
-                        ) : (
-                            <View style={{ gap: 10 }}>
-                                <TouchableOpacity disabled={busy} style={[styles.secondaryBtn, { borderColor: tint }]} onPress={findPayments}>
-                                    <Text style={{ color: tint, fontWeight: '800' }}>Find it in Tally</Text>
-                                </TouchableOpacity>
-                                {payments && (
-                                    <View style={{ gap: 8 }}>
-                                        <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
-                                            {payments.facts.utr ? `UTR ${payments.facts.utr}` : 'No UTR'} · {payments.facts.amount ? `₹${payments.facts.amount.toLocaleString('en-IN')}` : 'no amount'}
-                                        </Text>
-                                        {!!payments.note && <Text style={{ color: colors.warning, fontWeight: '600' }}>{payments.note}</Text>}
-                                        {payments.candidates.map(c => (
-                                            <View key={c.name} style={[styles.receipt, { borderColor: colors.border }]}>
-                                                <View style={{ flex: 1 }}>
-                                                    <Text style={{ color: colors.text, fontWeight: '800' }}>₹{c.amount.toLocaleString('en-IN')} · {c.customer}</Text>
-                                                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Voucher {c.voucher_no} · {c.date}{c.sales_invoice ? ` · ${c.sales_invoice}` : ''}</Text>
-                                                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{c.why}</Text>
-                                                </View>
-                                                {open && (
-                                                    <TouchableOpacity disabled={busy} style={[styles.smallBtn, { backgroundColor: tint }]}
-                                                        onPress={() => act(() => team.confirmPayment(job.id, c.name))}>
-                                                        <Text style={styles.primaryText}>Confirm</Text>
-                                                    </TouchableOpacity>
-                                                )}
-                                            </View>
-                                        ))}
-                                    </View>
-                                )}
-                            </View>
-                        ))}
-                    </View>
+            {/* What the job is, whom it is for, and its ERPNext step */}
+            <View style={[styles.bar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+                <JobTag job={job} colors={colors} meId={me}
+                    onKind={() => setPicker('kind')} onAssignee={() => setPicker('assignee')} />
+                {job.kind_suggested && (
+                    <Text style={[styles.guess, { color: colors.warning }]}>SmartOps guessed the type ({job.kind_why}) — tap it to change.</Text>
                 )}
-
-                {/* The thread */}
-                {thread.map(t => {
-                    const mine = t.author?.id === me;
-                    if (!t.author) {
-                        return (
-                            <View key={t.id} style={[styles.system, { backgroundColor: colors.surfaceSecondary }]}>
-                                <Ionicons name="sparkles-outline" size={14} color={colors.textSecondary} />
-                                <Text style={{ color: colors.textSecondary, fontSize: 13, flex: 1 }}>{t.body}</Text>
-                            </View>
-                        );
-                    }
-                    return (
-                        <View key={t.id} style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs, {
-                            backgroundColor: mine ? colors.primary : colors.surface, borderColor: colors.border,
-                        }]}>
-                            {!mine && <Text style={{ color: tint, fontWeight: '800', fontSize: 12 }}>{t.author.name}</Text>}
-                            {!!t.body && <Text style={{ color: mine ? '#FFF' : colors.text, fontSize: 15 }}>{t.body}</Text>}
-                            {!!t.attachment && <AttachmentView a={t.attachment} colors={colors} small />}
-                            <Text style={{ color: mine ? 'rgba(255,255,255,0.8)' : colors.textSecondary, fontSize: 11, alignSelf: 'flex-end' }}>
-                                {t.closed_job ? '✓ closed the job · ' : ''}{shortTime(t.created_at)}
-                            </Text>
-                        </View>
-                    );
-                })}
-            </ScrollView>
-
-            {/* Reply bar */}
-            <View style={[styles.replyBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <TouchableOpacity onPress={() => pickAttachment(setReplyFile)}>
-                    <Ionicons name={replyFile ? 'image' : 'attach'} size={26} color={replyFile ? colors.success : colors.textSecondary} />
-                </TouchableOpacity>
-                <TextInput
-                    style={[styles.replyInput, { color: colors.text, backgroundColor: colors.surfaceSecondary }]}
-                    placeholder={open && me === job.assignee?.id ? 'Reply — "Order placed" closes the job' : 'Reply'}
-                    placeholderTextColor={colors.placeholder} value={reply} onChangeText={setReply} multiline
-                />
-                <TouchableOpacity disabled={busy} onPress={sendReply} style={[styles.sendBtn, { backgroundColor: colors.primary }]}>
-                    {busy ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="send" size={18} color="#FFF" />}
-                </TouchableOpacity>
+                <ErpStepButton job={job} colors={colors} open={open} mayAct={mayAct}
+                    onOpenSheet={() => setStep(true)}
+                    onQuotation={() => router.push({ pathname: '/team/quotation', params: { id: job.id } })}
+                    onOpenQuotation={() => router.push({ pathname: '/quotations/[id]', params: { id: job.erpnext_name! } })} />
             </View>
 
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+                <ScrollView
+                    ref={scrollRef}
+                    contentContainerStyle={{ paddingVertical: 8 }}
+                    keyboardShouldPersistTaps="handled"
+                    onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+                >
+                    {messages.map((m, i) => {
+                        const prev = messages[i - 1];
+                        const newDay = !prev || !sameDay(prev.created_at, m.created_at);
+                        const grouped = !!prev && !newDay && !!prev.author && !!m.author && prev.author.id === m.author.id
+                            && new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_GAP_MS;
+                        return (
+                            <React.Fragment key={m.id}>
+                                {newDay && <DayDivider label={dayLabel(m.created_at)} colors={colors} />}
+                                <ReplyBubble reply={m} mine={!!me && m.author?.id === me} showAuthor={!grouped}
+                                    theme={theme} colors={colors} />
+                                {i === 0 && !!job.attachment && !!readLine(job.attachment) && (
+                                    <Text style={[styles.read, { color: colors.textSecondary }, me === job.author.id ? { textAlign: 'right' } : null]}>
+                                        {readLine(job.attachment)}
+                                    </Text>
+                                )}
+                            </React.Fragment>
+                        );
+                    })}
+                    {busy && <ActivityIndicator style={{ margin: 10 }} color={colors.primary} />}
+                </ScrollView>
+
+                <Composer
+                    onSend={reply}
+                    placeholder={open && me === job.assignee?.id ? `Reply — "${DONE_WORDS[job.kind].replace(' ✅', '')}" closes it` : 'Reply'}
+                    chips={chips}
+                />
+            </KeyboardAvoidingView>
+
             <PickerSheet
-                visible={sheet === 'kind'} title="What is asked" selected={job.kind}
+                visible={picker === 'kind'} title="What is asked" selected={job.kind}
                 options={(people?.kinds ?? []).map(k => ({ value: k.kind, label: k.label }))}
                 onPick={v => act(() => team.correct(job.id, { kind: v as JobKind }))}
-                onClose={() => setSheet(null)}
+                onClose={() => setPicker(null)}
             />
             <PickerSheet
-                visible={sheet === 'assignee'} title="Who it is for" selected={job.assignee?.id}
-                options={(people?.people ?? []).map(p => ({ value: p.id, label: p.name }))}
+                visible={picker === 'assignee'} title="Who it is for" selected={job.assignee?.id}
+                options={(people?.people ?? []).map(p => ({ value: p.id, label: displayName(p.name) }))}
                 onPick={v => act(() => team.correct(job.id, { assignee_id: v }))}
-                onClose={() => setSheet(null)}
+                onClose={() => setPicker(null)}
             />
-        </KeyboardAvoidingView>
+            <ErpStepSheet visible={step} job={job} colors={colors} busy={busy} open={open}
+                onClose={() => setStep(false)}
+                onDone={async fn => { const ok = await act(fn); if (ok) setStep(false); }} />
+        </View>
     );
 }
 
-/** The photo (or PDF) with what SmartOps read from it. */
-function AttachmentView({ a, colors, small }: { a: Attachment; colors: typeof Colors.light; small?: boolean }) {
-    const [source, setSource] = useState<{ uri: string; headers: Record<string, string> } | null>(null);
-    useEffect(() => { team.fileSource(a).then(setSource); }, [a]);
-    const isPdf = (a.mime || '').includes('pdf');
-    const read = [a.kind && a.kind !== 'unknown' ? a.kind.replace(/_/g, ' ') : null, a.ref, a.party].filter(Boolean).join(' · ');
+/** The one button for the job's ERPNext step, or what is already linked. */
+function ErpStepButton({ job, colors, open, mayAct, onOpenSheet, onQuotation, onOpenQuotation }: {
+    job: Job; colors: typeof Colors.light; open: boolean; mayAct: boolean;
+    onOpenSheet: () => void; onQuotation: () => void; onOpenQuotation: () => void;
+}) {
+    const tint = KIND_COLORS[job.kind];
+    // An older SmartOps sends no `action` at all: show no ERPNext step rather than a wrong one.
+    if (!job.action || job.action === 'none') return null;
+
+    let linked: string | null = null;
+    if (job.action === 'quotation' && job.erpnext_name && !job.erpnext_missing) {
+        linked = `${job.erpnext_name} · ${open ? 'draft — closes when approved' : 'approved'}`;
+    } else if (job.action === 'order_ref' && job.reference) {
+        linked = `Order no. ${job.reference}`;
+    } else if (job.action === 'dispatch' && job.reference) {
+        linked = `${job.transporter || 'Transport'} · LR ${job.reference}`;
+    } else if (job.action === 'payment' && job.erpnext_name) {
+        linked = `Tally receipt ${job.erpnext_name}`;
+    }
+
+    if (linked) {
+        const canOpen = job.action === 'quotation';
+        return (
+            <TouchableOpacity disabled={!canOpen} onPress={onOpenQuotation} activeOpacity={0.8}
+                style={[styles.linked, { backgroundColor: `${colors.success}14`, borderColor: `${colors.success}55` }]}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+                <Text style={[styles.linkedText, { color: colors.text }]} numberOfLines={1}>{linked}</Text>
+                {canOpen && <Ionicons name="open-outline" size={16} color={colors.success} />}
+            </TouchableOpacity>
+        );
+    }
+    if (!open || !mayAct) return null;
+
+    const label = job.action === 'quotation' ? `Make draft ${job.kind === 'proforma' ? 'pro-forma' : 'quotation'}`
+        : job.action === 'order_ref' ? 'Add the order number'
+            : job.action === 'dispatch' ? 'Add transporter & LR'
+                : 'Find the payment in Tally';
+    const icon = job.action === 'quotation' ? 'document-text' : job.action === 'order_ref' ? 'receipt'
+        : job.action === 'dispatch' ? 'car' : 'search';
     return (
-        <View style={{ gap: 6, marginTop: 6 }}>
-            {isPdf || !source ? (
-                <View style={[styles.pdf, { backgroundColor: colors.surfaceSecondary, height: small ? 56 : 80 }]}>
-                    <Ionicons name={isPdf ? 'document-text' : 'image-outline'} size={28} color={colors.textSecondary} />
-                    <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }} numberOfLines={1}>{a.filename || 'Attachment'}</Text>
-                </View>
-            ) : (
-                <Image source={source} style={{ width: '100%', height: small ? 160 : 260, borderRadius: 14 }} contentFit="contain" />
+        <TouchableOpacity onPress={job.action === 'quotation' ? onQuotation : onOpenSheet} activeOpacity={0.85}
+            style={[styles.stepBtn, { backgroundColor: tint }]}>
+            <Ionicons name={icon as any} size={17} color="#FFF" />
+            <Text style={styles.stepText}>{label}</Text>
+            <Text style={styles.stepErp}>ERPNext</Text>
+        </TouchableOpacity>
+    );
+}
+
+/** The short form for order no. / dispatch, or the payment matches. */
+function ErpStepSheet({ visible, job, colors, busy, open, onClose, onDone }: {
+    visible: boolean; job: Job; colors: typeof Colors.light; busy: boolean; open: boolean;
+    onClose: () => void; onDone: (fn: () => Promise<Result>) => Promise<void>;
+}) {
+    const tint = KIND_COLORS[job.kind];
+    const [reference, setReference] = useState('');
+    const [transporter, setTransporter] = useState(job.transporter ?? '');
+    const [payments, setPayments] = useState<Payments | null>(null);
+    const [searching, setSearching] = useState(false);
+
+    useEffect(() => {
+        if (!visible || job.action !== 'payment' || payments) return;
+        setSearching(true);
+        team.payments(job.id).then(r => {
+            setSearching(false);
+            if (r.ok) setPayments(r.data); else Alert.alert('Payment', r.error);
+        });
+    }, [visible, job.action, job.id, payments]);
+
+    const inputStyle = [styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }];
+
+    if (job.action === 'payment') {
+        return (
+            <Sheet visible={visible} onClose={onClose} title="Match the payment"
+                subtitle="From the Tally receipts in ERPNext — nothing new is created">
+                {searching && <ActivityIndicator color={colors.primary} />}
+                {payments && (
+                    <>
+                        <Text style={[styles.facts, { color: colors.textSecondary }]}>
+                            {payments.facts.utr ? `UTR ${payments.facts.utr}` : 'No UTR in the post'} ·{' '}
+                            {payments.facts.amount ? `₹${payments.facts.amount.toLocaleString('en-IN')}` : 'no amount'}
+                        </Text>
+                        {!!payments.note && <Text style={[styles.note, { color: colors.warning }]}>{payments.note}</Text>}
+                        {payments.candidates.map(c => (
+                            <View key={c.name} style={[styles.receipt, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                                <View style={{ flex: 1, gap: 2 }}>
+                                    <Text style={[styles.receiptAmt, { color: colors.text }]}>₹{c.amount.toLocaleString('en-IN')}</Text>
+                                    <Text style={{ color: colors.text, fontWeight: '700' }} numberOfLines={1}>{c.customer}</Text>
+                                    <Text style={[styles.small, { color: colors.textSecondary }]}>
+                                        Voucher {c.voucher_no} · {c.date}{c.sales_invoice ? ` · ${c.sales_invoice}` : ''}
+                                    </Text>
+                                    <Text style={[styles.small, { color: colors.textSecondary }]}>{c.why}</Text>
+                                </View>
+                                {open && (
+                                    <TouchableOpacity disabled={busy} onPress={() => onDone(() => team.confirmPayment(job.id, c.name))}
+                                        style={[styles.confirm, { backgroundColor: tint, opacity: busy ? 0.6 : 1 }]}>
+                                        <Text style={styles.confirmText}>This one</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        ))}
+                        {payments.candidates.length === 0 && !payments.note && (
+                            <Text style={[styles.note, { color: colors.textSecondary }]}>No matching receipt yet — Tally may not have it.</Text>
+                        )}
+                    </>
+                )}
+            </Sheet>
+        );
+    }
+
+    const isDispatch = job.action === 'dispatch';
+    const ready = !!reference.trim() && !busy;
+    return (
+        <Sheet visible={visible} onClose={onClose}
+            title={isDispatch ? 'Dispatch details' : 'Order placed'}
+            subtitle={isDispatch ? 'Saved on the job and the job closes' : `${job.principal || 'Principal'} order number — saved on the job and the job closes`}>
+            {isDispatch && (
+                <TextInput style={inputStyle} placeholder="Transporter" placeholderTextColor={colors.placeholder}
+                    value={transporter} onChangeText={setTransporter} />
             )}
-            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                {a.status === 'received' || !a.status ? 'SmartOps is reading it…' : read ? `Read as: ${read}` : 'Could not read much from it.'}
-            </Text>
-        </View>
+            <TextInput style={inputStyle} autoFocus placeholder={isDispatch ? 'LR number' : 'Order number'}
+                placeholderTextColor={colors.placeholder} value={reference} onChangeText={setReference} />
+            <TouchableOpacity disabled={!ready}
+                onPress={() => onDone(() => isDispatch
+                    ? team.dispatch(job.id, reference.trim(), transporter.trim())
+                    : team.orderRef(job.id, reference.trim()))}
+                style={[styles.save, { backgroundColor: tint, opacity: ready ? 1 : 0.5 }]}>
+                {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>Save and close the job</Text>}
+            </TouchableOpacity>
+        </Sheet>
     );
 }
 
 const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    card: { borderRadius: 18, borderWidth: 1.5, padding: 14, gap: 8 },
-    rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    kindChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-    kindText: { color: '#FFF', fontWeight: '800', fontSize: 13 },
-    note: { fontSize: 12, fontWeight: '600' },
-    assignee: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
-    body: { fontSize: 16, lineHeight: 22 },
-    section: { fontSize: 13, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 },
-    primaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, paddingVertical: 14 },
-    primaryText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
-    secondaryBtn: { borderWidth: 1.5, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
-    smallBtn: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-    input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-    receipt: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, padding: 10 },
-    system: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 12, padding: 10, alignSelf: 'center', maxWidth: '92%' },
-    bubble: { maxWidth: '85%', borderRadius: 16, padding: 10, gap: 4, borderWidth: 1 },
-    bubbleMine: { alignSelf: 'flex-end', borderBottomRightRadius: 4, borderWidth: 0 },
-    bubbleTheirs: { alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
-    pdf: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, paddingHorizontal: 12 },
-    replyBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 28, borderTopWidth: 1 },
-    replyInput: { flex: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, maxHeight: 120 },
-    sendBtn: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+    err: { fontWeight: '700', padding: 24, textAlign: 'center' },
+    bar: { paddingHorizontal: 14, paddingVertical: 10, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+    guess: { fontSize: 12, fontWeight: '600' },
+    stepBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 11,
+    },
+    stepText: { color: '#FFF', fontWeight: '900', fontSize: 14.5, flex: 1 },
+    stepErp: { color: 'rgba(255,255,255,0.85)', fontWeight: '800', fontSize: 11, letterSpacing: 0.6 },
+    linked: {
+        flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: Radius.md, borderWidth: 1,
+        paddingHorizontal: 12, paddingVertical: 9,
+    },
+    linkedText: { flex: 1, fontWeight: '700', fontSize: 13.5 },
+    read: { fontSize: 11.5, fontWeight: '600', paddingHorizontal: 50, marginTop: 2 },
+    input: { borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
+    save: { borderRadius: Radius.md, paddingVertical: 14, alignItems: 'center' },
+    saveText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
+    facts: { fontSize: 13, fontWeight: '700' },
+    note: { fontSize: 13, fontWeight: '600' },
+    receipt: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: Radius.md, padding: 12 },
+    receiptAmt: { fontSize: 17, fontWeight: '900' },
+    small: { fontSize: 12 },
+    confirm: { borderRadius: Radius.sm, paddingHorizontal: 12, paddingVertical: 9 },
+    confirmText: { color: '#FFF', fontWeight: '900', fontSize: 13 },
 });

@@ -1,152 +1,293 @@
 /**
- * Team — the office's job board. A post (photo + one line) is a job with a person and a
- * status; this list is what is waiting on whom. Replaces scrolling the WhatsApp group.
+ * Team Chat — the office group, as the team knows it from WhatsApp, where every post is
+ * also a job with a person and a status.
  *
- *   My jobs   open and given to me, oldest first (do the top one next)
- *   Open      everything still open, oldest first
- *   Sent      what I posted that is still open
- *   All       the whole feed, newest first
+ *   Chat     the group: every post, newest at the bottom, with the message box
+ *   For me   open and given to me, oldest first (do the top one next)
+ *   Open     everything still open, oldest first
+ *   Sent     what I posted that is still open
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+    ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, RefreshControl, StyleSheet, Text,
+    TouchableOpacity, View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 
-import { FloatingNav } from '@/components/FloatingNav';
+import { DayDivider, JobBubble } from '@/components/team/Bubbles';
+import { dayLabel, displayName, sameDay } from '@/components/team/chatUi';
+import { Composer, ComposerChip } from '@/components/team/Composer';
+import { JobRow } from '@/components/team/JobRow';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
-import { JobCard } from '@/components/team/JobCard';
-import { Colors } from '@/constants/theme';
+import { Colors, Radius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useResponsive } from '@/hooks/useResponsive';
 import { notificationService } from '@/services/NotificationService';
-import { erpSession, Job, JobView, Person, team } from '@/services/teamApi';
+import { age, erpSession, Job, JobView, People, PickedFile, team } from '@/services/teamApi';
 
-const VIEWS: { view: JobView; label: string }[] = [
-    { view: 'mine', label: 'My jobs' },
-    { view: 'open', label: 'Open' },
-    { view: 'sent', label: 'Sent' },
-    { view: 'feed', label: 'All' },
+type Tab = 'chat' | 'mine' | 'open' | 'sent';
+const TABS: { tab: Tab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { tab: 'chat', label: 'Chat', icon: 'chatbubbles' },
+    { tab: 'mine', label: 'For me', icon: 'person' },
+    { tab: 'open', label: 'Open', icon: 'time' },
+    { tab: 'sent', label: 'Sent', icon: 'paper-plane' },
 ];
-const POLL_MS = 20000;
+const POLL_MS = 12000;
 const SEEN_KEY = 'team_seen_mine';
+/** Posts by the same person this close together sit under one name, as in WhatsApp. */
+const GROUP_GAP_MS = 10 * 60 * 1000;
+
+type ChatItem = { type: 'job'; job: Job; showAuthor: boolean } | { type: 'day'; key: string; label: string };
 
 export default function TeamScreen() {
     const router = useRouter();
     const theme = useColorScheme() ?? 'light';
     const colors = Colors[theme];
-    const { vs, ms } = useResponsive();
+    const { ms } = useResponsive();
 
-    const [view, setView] = useState<JobView>('mine');
-    const [jobs, setJobs] = useState<Job[]>([]);
-    const [me, setMe] = useState<Person | null>(null);
-    const [mineCount, setMineCount] = useState<number | null>(null);
+    const [tab, setTab] = useState<Tab>('chat');
+    const [chat, setChat] = useState<Job[]>([]);          // newest first
+    const [older, setOlder] = useState<string | null>(null);
+    const [list, setList] = useState<Job[]>([]);
+    const [mine, setMine] = useState<Job[] | null>(null);
+    const [people, setPeople] = useState<People | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const viewRef = useRef(view);
-    viewRef.current = view;
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    const tabRef = useRef<Tab>('chat'); // the tab a poll that is already running should fill
+    const chatRef = useRef<FlatList<ChatItem>>(null);
+    const me = people?.me.id;
 
-    const load = useCallback(async (which: JobView = viewRef.current) => {
-        const [list, mine] = await Promise.all([
-            team.jobs(which),
-            which === 'mine' ? Promise.resolve(null) : team.jobs('mine'),
-        ]);
-        if (which !== viewRef.current) return; // the person switched tabs meanwhile
-        if (!list.ok) {
-            setError(list.error);
-        } else {
-            setError(null);
-            setJobs(list.data.jobs);
-            const myJobs = which === 'mine' ? list.data.jobs : mine && mine.ok ? mine.data.jobs : null;
-            if (myJobs) {
-                setMineCount(myJobs.length);
-                await announceNew(myJobs);
-            }
+    const loadChat = useCallback(async () => {
+        const r = await team.jobs('feed');
+        if (!r.ok) return r.error;
+        const fresh = r.data.jobs;
+        setChat(prev => mergeNewestFirst(fresh, prev));
+        setOlder(o => o ?? (fresh.length ? r.data.next_before ?? fresh[fresh.length - 1].created_at : null));
+        return null;
+    }, []);
+
+    const loadList = useCallback(async (which: Exclude<Tab, 'chat'>) => {
+        const r = await team.jobs(which as JobView);
+        if (!r.ok) return r.error;
+        if (tabRef.current === which) setList(r.data.jobs);
+        return null;
+    }, []);
+
+    const loadMine = useCallback(async () => {
+        const r = await team.jobs('mine');
+        if (r.ok) {
+            setMine(r.data.jobs);
+            await announceNew(r.data.jobs);
         }
+    }, []);
+
+    const refresh = useCallback(async () => {
+        const which = tabRef.current;
+        const [err] = await Promise.all([which === 'chat' ? loadChat() : loadList(which), loadMine()]);
+        setError(err);
         setLoading(false);
         setRefreshing(false);
-    }, []);
+    }, [loadChat, loadList, loadMine]);
 
-    useEffect(() => {
-        team.people().then(r => { if (r.ok) setMe(r.data.me); });
-    }, []);
+    useEffect(() => { team.people().then(r => { if (r.ok) setPeople(r.data); }); }, []);
 
-    // Refresh while the screen is in front; stop when it is not.
     useFocusEffect(useCallback(() => {
-        load();
-        const timer = setInterval(() => load(), POLL_MS);
+        refresh();
+        const timer = setInterval(refresh, POLL_MS);
         return () => clearInterval(timer);
-    }, [load]));
+    }, [refresh]));
 
-    const switchTo = (v: JobView) => {
-        setView(v);
-        setLoading(true);
-        setJobs([]);
-        load(v);
+    const switchTo = (t: Tab) => {
+        if (t === tab) return;
+        setTab(t);
+        tabRef.current = t;
+        if (t !== 'chat') { setList([]); setLoading(true); }
+        refresh();
     };
+
+    const loadOlderPosts = async () => {
+        if (!older || loadingOlder) return;
+        setLoadingOlder(true);
+        const r = await team.jobs('feed', older);
+        setLoadingOlder(false);
+        if (!r.ok) return;
+        const page = r.data.jobs;
+        setChat(prev => mergeNewestFirst(prev, page));
+        setOlder(page.length ? r.data.next_before ?? page[page.length - 1].created_at : null);
+    };
+
+    const post = async (text: string, file: PickedFile | null) => {
+        const r = await team.post(text, file);
+        if (!r.ok) {
+            Alert.alert('Not posted', r.error);
+            return false;
+        }
+        setChat(prev => mergeNewestFirst([r.data.job], prev));
+        chatRef.current?.scrollToOffset({ offset: 0, animated: true });
+        return true;
+    };
+
+    const open = (id: string) => router.push({ pathname: '/team/[id]', params: { id } });
+
+    const items = useMemo(() => chatItems(chat), [chat]);
+
+    const chips: ComposerChip[] = useMemo(() => (people?.people ?? [])
+        .filter(p => p.id !== me)
+        .map(p => {
+            const first = displayName(p.name).split(' ')[0];
+            return { label: `@${first}`, insert: `${first}, ` };
+        }), [people, me]);
+
+    const waiting = mine?.length ?? 0;
+    const oldest = mine && mine.length ? Math.max(...mine.map(j => j.age_minutes)) : 0;
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <ScreenHeader
                 title="Team Chat"
-                subtitle={me?.name}
+                subtitle={people ? `${people.people.length} people · ${waiting ? `${waiting} waiting for you` : 'nothing waiting for you'}` : 'Office team'}
                 onBack={() => (router.canGoBack() ? router.back() : router.replace('/home'))}
-                rightIcon="add"
-                onRightPress={() => router.push('/team/new')}
             >
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pills}>
-                    {VIEWS.map(v => {
-                        const active = v.view === view;
-                        const label = v.view === 'mine' && mineCount !== null ? `${v.label} (${mineCount})` : v.label;
+                <View style={[styles.tabs, { backgroundColor: 'rgba(255,255,255,0.14)' }]}>
+                    {TABS.map(t => {
+                        const active = t.tab === tab;
+                        const count = t.tab === 'mine' && waiting ? waiting : null;
                         return (
-                            <TouchableOpacity
-                                key={v.view}
-                                onPress={() => switchTo(v.view)}
-                                style={[styles.pill, {
-                                    backgroundColor: active ? '#FFF' : 'rgba(255,255,255,0.16)',
-                                    borderColor: active ? '#FFF' : 'rgba(255,255,255,0.3)',
-                                }]}
-                            >
-                                <Text style={{ color: active ? colors.primary : '#FFF', fontWeight: '800', fontSize: ms(14) }}>{label}</Text>
+                            <TouchableOpacity key={t.tab} onPress={() => switchTo(t.tab)} activeOpacity={0.8}
+                                style={[styles.tab, active && { backgroundColor: '#FFF' }]}>
+                                <Ionicons name={t.icon} size={14} color={active ? colors.primary : '#FFF'} />
+                                <Text style={[styles.tabText, { color: active ? colors.primary : '#FFF', fontSize: ms(13) }]}>{t.label}</Text>
+                                {count !== null && (
+                                    <View style={[styles.count, { backgroundColor: active ? colors.primary : '#FFF' }]}>
+                                        <Text style={[styles.countText, { color: active ? '#FFF' : colors.primary }]}>{count}</Text>
+                                    </View>
+                                )}
                             </TouchableOpacity>
                         );
                     })}
-                </ScrollView>
+                </View>
             </ScreenHeader>
 
             {error ? (
                 <View style={[styles.notice, { backgroundColor: colors.surface, borderColor: colors.danger }]}>
                     <Ionicons name="alert-circle-outline" size={22} color={colors.danger} />
                     <Text style={[styles.noticeText, { color: colors.text }]}>{error}</Text>
-                    <TouchableOpacity onPress={() => { setLoading(true); load(); }}>
+                    <TouchableOpacity onPress={() => { setLoading(true); refresh(); }}>
                         <Text style={{ color: colors.primary, fontWeight: '800' }}>Retry</Text>
                     </TouchableOpacity>
                 </View>
-            ) : loading ? (
-                <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+            ) : tab === 'chat' ? (
+                <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+                    {waiting > 0 && (
+                        <TouchableOpacity onPress={() => switchTo('mine')} activeOpacity={0.85}
+                            style={[styles.banner, { backgroundColor: colors.primarySoft, borderColor: `${colors.primary}40` }]}>
+                            <Ionicons name="flag" size={16} color={colors.primary} />
+                            <Text style={[styles.bannerText, { color: colors.primary }]} numberOfLines={1}>
+                                {waiting === 1 ? '1 job is waiting for you' : `${waiting} jobs are waiting for you`} · oldest {age(oldest)}
+                            </Text>
+                            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                        </TouchableOpacity>
+                    )}
+                    {loading ? (
+                        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+                    ) : items.length === 0 ? (
+                        <EmptyChat colors={colors} />
+                    ) : (
+                        <FlatList
+                            ref={chatRef}
+                            inverted
+                            data={items}
+                            keyExtractor={i => (i.type === 'job' ? i.job.id : i.key)}
+                            renderItem={({ item }) => item.type === 'day'
+                                ? <DayDivider label={item.label} colors={colors} />
+                                : <JobBubble job={item.job} mine={item.job.author.id === me} showAuthor={item.showAuthor}
+                                    meId={me} theme={theme} colors={colors} onPress={() => open(item.job.id)} />}
+                            contentContainerStyle={{ paddingVertical: 10 }}
+                            onEndReached={loadOlderPosts}
+                            onEndReachedThreshold={0.4}
+                            ListFooterComponent={loadingOlder ? <ActivityIndicator style={{ margin: 16 }} color={colors.primary} /> : undefined}
+                            keyboardShouldPersistTaps="handled"
+                        />
+                    )}
+                    <Composer
+                        onSend={post}
+                        placeholder="Name, then what's needed…"
+                        chips={chips}
+                        chipsTitle="To:"
+                    />
+                </KeyboardAvoidingView>
             ) : (
                 <FlatList
-                    data={jobs}
+                    data={list}
                     keyExtractor={j => j.id}
-                    renderItem={({ item }) => (
-                        <JobCard job={item} meId={me?.id} onPress={() => router.push({ pathname: '/team/[id]', params: { id: item.id } })} />
-                    )}
-                    contentContainerStyle={{ paddingTop: 16, paddingBottom: vs(140) }}
-                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-                    ListEmptyComponent={
-                        <Text style={[styles.empty, { color: colors.textSecondary }]}>
-                            {view === 'mine' ? 'Nothing waiting on you. 🎉' : view === 'sent' ? 'Nothing you posted is still open.' : 'No jobs yet.'}
-                        </Text>
-                    }
+                    renderItem={({ item }) => <JobRow job={item} meId={me} colors={colors} onPress={() => open(item.id)} />}
+                    contentContainerStyle={{ paddingVertical: 6, flexGrow: 1 }}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); refresh(); }} />}
+                    ListEmptyComponent={loading
+                        ? <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+                        : <EmptyList tab={tab} colors={colors} onChat={() => switchTo('chat')} />}
                 />
             )}
-            <FloatingNav />
         </View>
     );
+}
+
+function EmptyChat({ colors }: { colors: typeof Colors.light }) {
+    return (
+        <View style={styles.empty}>
+            <View style={[styles.emptyIcon, { backgroundColor: colors.primarySoft }]}>
+                <Ionicons name="chatbubbles" size={34} color={colors.primary} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>Post the first job</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                {'Start with the person\'s name and say what is needed — "Gayathri, kindly send the pro-forma to …". Add a photo of the PO with the camera. SmartOps works out the job and who it is for.'}
+            </Text>
+        </View>
+    );
+}
+
+function EmptyList({ tab, colors, onChat }: { tab: Tab; colors: typeof Colors.light; onChat: () => void }) {
+    const text = tab === 'mine' ? 'Nothing is waiting for you.' : tab === 'sent' ? 'Nothing you posted is still open.' : 'No open jobs.';
+    return (
+        <View style={styles.empty}>
+            <View style={[styles.emptyIcon, { backgroundColor: `${colors.success}22` }]}>
+                <Ionicons name="checkmark-done" size={34} color={colors.success} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>{text}</Text>
+            <TouchableOpacity onPress={onChat} style={[styles.emptyBtn, { borderColor: colors.primary }]}>
+                <Text style={{ color: colors.primary, fontWeight: '800' }}>Go to the chat</Text>
+            </TouchableOpacity>
+        </View>
+    );
+}
+
+/** Newest first, no duplicates; a job in `a` wins over the same job in `b` (it is fresher). */
+function mergeNewestFirst(a: Job[], b: Job[]): Job[] {
+    const byId = new Map<string, Job>();
+    for (const j of b) byId.set(j.id, j);
+    for (const j of a) byId.set(j.id, j);
+    return [...byId.values()].sort((x, y) => (x.created_at < y.created_at ? 1 : -1));
+}
+
+/** The inverted list's rows: posts newest first, a day label after each day's oldest post. */
+function chatItems(jobs: Job[]): ChatItem[] {
+    const items: ChatItem[] = [];
+    jobs.forEach((job, i) => {
+        const prev = jobs[i + 1]; // the post just before it in time
+        const grouped = !!prev && prev.author.id === job.author.id && sameDay(prev.created_at, job.created_at)
+            && new Date(job.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_GAP_MS;
+        items.push({ type: 'job', job, showAuthor: !grouped });
+        if (!prev || !sameDay(prev.created_at, job.created_at)) {
+            items.push({ type: 'day', key: `day-${job.created_at.slice(0, 10)}-${job.id}`, label: dayLabel(job.created_at) });
+        }
+    });
+    return items;
 }
 
 /**
@@ -154,19 +295,19 @@ export default function TeamScreen() {
  * app being open or in the background. What has been seen is kept per ERPNext session, so a
  * different person logging in on this phone is not alerted to someone else's backlog.
  */
-async function announceNew(mine: Job[]): Promise<void> {
+async function announceNew(mineJobs: Job[]): Promise<void> {
     try {
         const [raw, sid] = await Promise.all([SecureStore.getItemAsync(SEEN_KEY), erpSession()]);
-        const ids = mine.map(j => j.id);
+        const ids = mineJobs.map(j => j.id);
         const kept = parseSeen(raw);
         if (!kept || kept.sid !== sid) { // first look for this login: remember, do not announce the backlog
             await SecureStore.setItemAsync(SEEN_KEY, JSON.stringify({ sid, ids }));
             return;
         }
         const seen = new Set<string>(kept.ids);
-        for (const job of mine.filter(j => !seen.has(j.id))) {
+        for (const job of mineJobs.filter(j => !seen.has(j.id))) {
             await notificationService.postLocalNotification(
-                `${job.kind_label} — from ${job.author.name}`,
+                `${job.kind_label} — from ${displayName(job.author.name)}`,
                 job.body || job.customer_hint || 'A new job for you', { teamJobId: job.id });
         }
         await SecureStore.setItemAsync(SEEN_KEY, JSON.stringify({ sid, ids: ids.slice(0, 200) }));
@@ -187,9 +328,24 @@ function parseSeen(raw: string | null): { sid: string | null; ids: string[] } | 
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    pills: { gap: 8, paddingTop: 12 },
-    pill: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 14, borderWidth: 1 },
+    tabs: { flexDirection: 'row', borderRadius: Radius.pill, padding: 4, marginTop: 14, gap: 4 },
+    tab: {
+        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+        paddingVertical: 8, borderRadius: Radius.pill,
+    },
+    tabText: { fontWeight: '800' },
+    count: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, justifyContent: 'center', alignItems: 'center' },
+    countText: { fontSize: 11, fontWeight: '900' },
+    banner: {
+        flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginTop: 10,
+        paddingHorizontal: 14, paddingVertical: 10, borderRadius: Radius.md, borderWidth: 1,
+    },
+    bannerText: { flex: 1, fontSize: 13.5, fontWeight: '800' },
     notice: { margin: 16, padding: 16, borderRadius: 16, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
     noticeText: { flex: 1, fontSize: 14, fontWeight: '600' },
-    empty: { textAlign: 'center', marginTop: 48, fontSize: 15, fontWeight: '600' },
+    empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 12, paddingVertical: 40 },
+    emptyIcon: { width: 76, height: 76, borderRadius: 38, justifyContent: 'center', alignItems: 'center' },
+    emptyTitle: { fontSize: 18, fontWeight: '900', textAlign: 'center' },
+    emptyText: { fontSize: 14, lineHeight: 20, textAlign: 'center', fontWeight: '500' },
+    emptyBtn: { borderWidth: 1.5, borderRadius: Radius.pill, paddingHorizontal: 18, paddingVertical: 9, marginTop: 4 },
 });

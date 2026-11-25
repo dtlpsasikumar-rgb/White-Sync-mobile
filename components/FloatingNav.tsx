@@ -22,7 +22,6 @@ const NAV_ROUTES = [
     '/daily-sales-report/invoice-history',
     '/price-calculator',
     '/profile',
-    '/team',
 ];
 
 const NAV_ITEMS = [
