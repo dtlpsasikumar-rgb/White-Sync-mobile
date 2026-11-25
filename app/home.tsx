@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ScrollViewInstance } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import Animated, {
     Easing,
@@ -421,7 +421,7 @@ export default function HomeScreen() {
     // On first layout Android can leave this page scrolled to the bottom once the
     // content is taller than the screen, hiding the header. Pin to the top while the
     // content settles (first ~2s), then leave scrolling entirely to the user.
-    const scrollRef = useRef<ScrollView>(null);
+    const scrollRef = useRef<ScrollViewInstance>(null);
     const settleUntil = useRef(0);
     const pinToTopWhileSettling = () => {
         if (!settleUntil.current) settleUntil.current = Date.now() + 2000;
@@ -657,7 +657,7 @@ function getStyles(theme: 'light' | 'dark', { s, vs, ms }: any) {
         metricLabel: { fontSize: ms(12), color: colors.textSecondary, fontWeight: '700' },
         metricValue: { fontSize: ms(18), fontWeight: '900' },
         bgTint: { position: 'absolute', top: 0, left: 0, right: 0, height: vs(430) },
-        heroDeco: { ...StyleSheet.absoluteFillObject, borderRadius: ms(28), overflow: 'hidden' },
+        heroDeco: { ...StyleSheet.absoluteFill, borderRadius: ms(28), overflow: 'hidden' },
         heroCircle: { position: 'absolute', borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.14)' },
         navSection: { paddingHorizontal: s(16), paddingBottom: s(24), gap: s(10) },
         navRowCard: {
