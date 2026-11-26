@@ -86,7 +86,11 @@ export interface JobDetail { job: Job; thread: Reply[] }
 export interface Jobs { view: JobView; jobs: Job[]; next_before?: string | null }
 export interface People { me: Person; people: Person[]; kinds: { kind: JobKind; label: string }[] }
 
-export interface PlanLine { line_no: number; description: string; qty?: number | null; rate?: number | null; item_code?: string | null }
+export interface PlanLine {
+    line_no: number; description: string; qty?: number | null; rate?: number | null; item_code?: string | null;
+    /** The closest ERPNext item as SmartOps ranks it -- offered with a "Use" button, never filled in. */
+    suggested_item_code?: string | null; suggested_item_name?: string | null; suggested_how?: string | null;
+}
 export interface Plan {
     action: JobAction;
     kind: JobKind;

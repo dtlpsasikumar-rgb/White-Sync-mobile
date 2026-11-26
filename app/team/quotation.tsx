@@ -2,9 +2,10 @@
  * Make the draft pro-forma / quotation for a team job.
  *
  * Starts from what SmartOps read: the brand from the principal named in the post, the
- * customers matching the post and the PO photo, and the photo's lines. A person picks each
- * item from ERPNext's catalogue -- items are never guessed -- and sees what this customer
- * was last quoted for it. The result is a DRAFT in ERPNext, in the principal's own series;
+ * customers matching the post and the PO photo, and the photo's lines. Each line offers the
+ * closest ERPNext item SmartOps found, with a "Use" button (or "Use all suggestions") -- a
+ * person still chooses every item, nothing is filled in for them -- and shows what this
+ * customer was last quoted for it. The result is a DRAFT in ERPNext, in the principal's own series;
  * it is sent for approval there as today, and the job closes when it is approved.
  */
 
@@ -32,6 +33,8 @@ interface Line {
     qty: string;
     rate: string;
     last?: string | null;
+    /** SmartOps' closest ERPNext item for this line: offered, never applied by itself. */
+    suggestion?: { code: string; name: string; how?: string | null } | null;
 }
 
 let keySeq = 0;
@@ -62,6 +65,9 @@ export default function QuotationScreen() {
             const fromPhoto = p.lines.map(l => ({
                 key: newKey(), description: l.description, item_code: l.item_code ?? '', item_name: l.item_code ?? '',
                 qty: l.qty ? String(l.qty) : '', rate: l.rate != null ? String(l.rate) : '',
+                suggestion: l.suggested_item_code
+                    ? { code: l.suggested_item_code, name: l.suggested_item_name || l.suggested_item_code, how: l.suggested_how }
+                    : null,
             }));
             setLines(fromPhoto.length ? fromPhoto : [{ key: newKey(), description: '', item_code: '', item_name: '', qty: '', rate: '' }]);
         });
@@ -86,6 +92,13 @@ export default function QuotationScreen() {
 
     const update = (key: string, change: Partial<Line>) =>
         setLines(cur => cur.map(l => l.key === key ? { ...l, ...change } : l));
+
+    /** Take SmartOps' suggestion for one line (or every unpicked line) -- the person's tap. */
+    const takeSuggestion = (key?: string) =>
+        setLines(cur => cur.map(l => (key ? l.key === key : true) && !l.item_code && l.suggestion
+            ? { ...l, item_code: l.suggestion.code, item_name: l.suggestion.name, last: undefined }
+            : l));
+    const suggestionsLeft = lines.filter(l => !l.item_code && l.suggestion).length;
 
     const searchItemOptions = useCallback(async (q: string): Promise<PickOption[]> => {
         const r = await searchItems(q);
@@ -172,7 +185,16 @@ export default function QuotationScreen() {
                     </Text>
                 </TouchableOpacity>
 
-                <Text style={[styles.label, { color: colors.textSecondary }]}>Items</Text>
+                <View style={styles.rowBetween}>
+                    <Text style={[styles.label, { color: colors.textSecondary }]}>Items</Text>
+                    {suggestionsLeft > 1 && (
+                        <TouchableOpacity onPress={() => takeSuggestion()}>
+                            <Text style={{ color: colors.primary, fontWeight: '800', marginTop: 6 }}>
+                                Use all {suggestionsLeft} suggestions
+                            </Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
                 {lines.map((l, i) => (
                     <View key={l.key} style={[styles.line, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                         <View style={styles.rowBetween}>
@@ -189,6 +211,22 @@ export default function QuotationScreen() {
                                 {l.item_code ? `${l.item_name} (${l.item_code})` : 'Pick the ERPNext item'}
                             </Text>
                         </TouchableOpacity>
+                        {!l.item_code && !!l.suggestion && (
+                            <View style={[styles.suggestion, { backgroundColor: colors.surfaceVariant }]}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800' }}>
+                                        SUGGESTED{l.suggestion.how ? ` · ${l.suggestion.how.toUpperCase()}` : ''} — CHECK IT
+                                    </Text>
+                                    <Text style={{ color: colors.text, fontWeight: '700' }} numberOfLines={2}>
+                                        {l.suggestion.name} ({l.suggestion.code})
+                                    </Text>
+                                </View>
+                                <TouchableOpacity onPress={() => takeSuggestion(l.key)}
+                                    style={[styles.useBtn, { backgroundColor: colors.primary }]}>
+                                    <Text style={{ color: '#FFF', fontWeight: '900' }}>Use</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                         <View style={{ flexDirection: 'row', gap: 10 }}>
                             <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border, flex: 1 }]}
                                 placeholder="Qty" placeholderTextColor={colors.placeholder} keyboardType="decimal-pad"
@@ -235,6 +273,8 @@ const styles = StyleSheet.create({
     line: { borderWidth: 1, borderRadius: 16, padding: 12, gap: 8 },
     rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     itemPick: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1.5, borderRadius: 12, padding: 10 },
+    suggestion: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 10 },
+    useBtn: { borderRadius: 10, paddingVertical: 8, paddingHorizontal: 16 },
     input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
     create: { borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
     createText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
