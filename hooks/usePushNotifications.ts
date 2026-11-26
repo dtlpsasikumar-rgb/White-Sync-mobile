@@ -27,10 +27,7 @@ async function registerForPushNotificationsAsync(): Promise<string | undefined> 
     // throws, and the retry loop below would show that error every few seconds.
     // `isRunningInExpoGo()` is Expo's own check; `Constants.executionEnvironment` did not
     // report Expo Go as `storeClient` on SDK 58, so that test let the error through.
-    if (isRunningInExpoGo()) {
-        console.log('[usePushNotifications] Running in Expo Go, no remote push; skipping');
-        return undefined;
-    }
+    if (isRunningInExpoGo()) return undefined;
 
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -108,8 +105,13 @@ export const usePushNotifications = () => {
 
         let cancelled = false;
         let registeredWithServer = false;
+        // Expo Go cannot have a push token at all, so there is nothing to retry: without this
+        // the loop below asked every 5 seconds for two minutes and logged "skipping" each time.
+        const noRemotePush = isRunningInExpoGo();
+        if (noRemotePush) console.log('[usePushNotifications] Running in Expo Go, no remote push');
 
         const registerAndSend = () => {
+            if (noRemotePush) return;
             registerForPushNotificationsAsync().then(token => {
                 if (cancelled || !token) return;
                 setExpoPushToken(token);
