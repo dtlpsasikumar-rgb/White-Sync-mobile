@@ -90,6 +90,8 @@ export interface PlanLine {
     line_no: number; description: string; qty?: number | null; rate?: number | null; item_code?: string | null;
     /** The closest ERPNext item as SmartOps ranks it -- offered with a "Use" button, never filled in. */
     suggested_item_code?: string | null; suggested_item_name?: string | null; suggested_how?: string | null;
+    /** 'photo': a line of the customer's PO; 'message': read from a typed request's words. */
+    source?: 'photo' | 'message'; uom?: string | null;
 }
 export interface Plan {
     action: JobAction;

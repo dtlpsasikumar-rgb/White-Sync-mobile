@@ -33,6 +33,8 @@ interface Line {
     qty: string;
     rate: string;
     last?: string | null;
+    /** Where the line came from: the PO photo, or the words of a typed request. */
+    fromMessage?: boolean;
     /** SmartOps' closest ERPNext item for this line: offered, never applied by itself. */
     suggestion?: { code: string; name: string; how?: string | null } | null;
 }
@@ -65,6 +67,7 @@ export default function QuotationScreen() {
             const fromPhoto = p.lines.map(l => ({
                 key: newKey(), description: l.description, item_code: l.item_code ?? '', item_name: l.item_code ?? '',
                 qty: l.qty ? String(l.qty) : '', rate: l.rate != null ? String(l.rate) : '',
+                fromMessage: l.source === 'message',
                 suggestion: l.suggested_item_code
                     ? { code: l.suggested_item_code, name: l.suggested_item_name || l.suggested_item_code, how: l.suggested_how }
                     : null,
@@ -203,7 +206,7 @@ export default function QuotationScreen() {
                                 <Ionicons name="trash-outline" size={18} color={colors.danger} />
                             </TouchableOpacity>
                         </View>
-                        {!!l.description && <Text style={{ color: colors.text }}>On the PO: {l.description}</Text>}
+                        {!!l.description && <Text style={{ color: colors.text }}>{l.fromMessage ? 'Asked for' : 'On the PO'}: {l.description}</Text>}
                         <TouchableOpacity onPress={() => setItemFor(l.key)}
                             style={[styles.itemPick, { borderColor: l.item_code ? colors.success : colors.warning }]}>
                             <Ionicons name={l.item_code ? 'checkmark-circle' : 'search'} size={18} color={l.item_code ? colors.success : colors.warning} />
