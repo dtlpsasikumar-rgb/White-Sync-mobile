@@ -80,6 +80,8 @@ export interface Job {
     replies: number;
     last_reply_at?: string | null;
     voice?: Voice | null;
+    /** Deleted: `body` reads "Message deleted"; no attachment, no voice note. */
+    deleted?: boolean;
 }
 
 export interface Reply {
@@ -90,6 +92,7 @@ export interface Reply {
     attachment?: Attachment | null;
     created_at: string;
     voice?: Voice | null;
+    deleted?: boolean;
 }
 
 export interface JobDetail { job: Job; thread: Reply[] }
@@ -247,6 +250,10 @@ export const team = {
         post<JobDetail>(`/bff/v1/team/jobs/${id}/reread`, { document_id: documentId }),
     reopen: (id: string) => post<JobDetail>(`/bff/v1/team/jobs/${id}/reopen`),
     cancel: (id: string) => post<JobDetail>(`/bff/v1/team/jobs/${id}/cancel`),
+    /** Delete my post or reply: it stays in the thread as "Message deleted". */
+    deletePost: (id: string) => post<JobDetail>(`/bff/v1/team/jobs/${id}/delete`),
+    deleteReply: (id: string, replyId: string) =>
+        post<JobDetail>(`/bff/v1/team/jobs/${id}/replies/${replyId}/delete`),
     correct: (id: string, change: { kind?: JobKind; assignee_id?: string }) =>
         post<JobDetail>(`/bff/v1/team/jobs/${id}/correct`, change),
     plan: (id: string) => get<Plan>(`/bff/v1/team/jobs/${id}/erpnext`),

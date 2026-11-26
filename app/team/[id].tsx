@@ -141,7 +141,20 @@ export default function JobScreen() {
     // The post itself opens the thread, as the first message.
     const post: Reply = {
         id: `post-${job.id}`, body: job.body, author: job.author, closed_job: false,
-        attachment: job.attachment, created_at: job.created_at,
+        attachment: job.attachment, created_at: job.created_at, voice: job.voice, deleted: job.deleted,
+    };
+
+    /** Hold my own message: delete it. It stays in the thread as "Message deleted". */
+    const askDelete = (m: Reply) => {
+        const isPost = m.id === post.id;
+        Alert.alert('Delete message?',
+            isPost ? 'It is deleted for everyone and the job is cancelled. Replies stay.' : 'It is deleted for everyone.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete', style: 'destructive',
+                onPress: () => act(() => isPost ? team.deletePost(job.id) : team.deleteReply(job.id, m.id)),
+            },
+        ]);
     };
     const messages = [post, ...detail.thread];
 
@@ -186,7 +199,8 @@ export default function JobScreen() {
                                 {newDay && <DayDivider label={dayLabel(m.created_at)} colors={colors} />}
                                 <ReplyBubble reply={m} mine={!!me && m.author?.id === me} showAuthor={!grouped}
                                     theme={theme} colors={colors} onRetryRead={readAgain}
-                                    retrying={!!m.attachment && rereading === m.attachment.document_id} />
+                                    retrying={!!m.attachment && rereading === m.attachment.document_id}
+                                    onLongPress={!!me && m.author?.id === me && !m.deleted ? () => askDelete(m) : undefined} />
                             </React.Fragment>
                         );
                     })}

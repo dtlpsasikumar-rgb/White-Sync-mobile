@@ -134,6 +134,20 @@ export default function TeamScreen() {
 
     const open = (id: string) => router.push({ pathname: '/team/[id]', params: { id } });
 
+    /** Hold my own post: delete it for everyone (it stays as "Message deleted"). */
+    const askDelete = (job: Job) => Alert.alert('Delete message?',
+        'It is deleted for everyone and the job is cancelled. Replies stay.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+            text: 'Delete', style: 'destructive', onPress: async () => {
+                const r = await team.deletePost(job.id);
+                if (!r.ok) { Alert.alert('Not deleted', r.error); return; }
+                setChat(prev => mergeNewestFirst([r.data.job], prev));
+                loadMine();
+            },
+        },
+    ]);
+
     const items = useMemo(() => chatItems(chat), [chat]);
 
     const chips: ComposerChip[] = useMemo(() => (people?.people ?? [])
@@ -207,7 +221,8 @@ export default function TeamScreen() {
                             renderItem={({ item }) => item.type === 'day'
                                 ? <DayDivider label={item.label} colors={colors} />
                                 : <JobBubble job={item.job} mine={item.job.author.id === me} showAuthor={item.showAuthor}
-                                    meId={me} theme={theme} colors={colors} onPress={() => open(item.job.id)} />}
+                                    meId={me} theme={theme} colors={colors} onPress={() => open(item.job.id)}
+                                    onLongPress={item.job.author.id === me && !item.job.deleted ? () => askDelete(item.job) : undefined} />}
                             contentContainerStyle={{ paddingVertical: 10 }}
                             onEndReached={loadOlderPosts}
                             onEndReachedThreshold={0.4}

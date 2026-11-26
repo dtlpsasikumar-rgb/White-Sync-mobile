@@ -24,9 +24,10 @@ function useBubbleWidth() {
     return Math.min(width * 0.78, 340);
 }
 
-function Shell({ mine, showAuthor, authorName, theme, colors, children, onPress, highlight }: {
+function Shell({ mine, showAuthor, authorName, theme, colors, children, onPress, onLongPress, highlight }: {
     mine: boolean; showAuthor: boolean; authorName?: string | null; theme: 'light' | 'dark';
-    colors: ThemeColors; children: React.ReactNode; onPress?: () => void; highlight?: string;
+    colors: ThemeColors; children: React.ReactNode; onPress?: () => void; onLongPress?: () => void;
+    highlight?: string;
 }) {
     const maxWidth = useBubbleWidth();
     const body = (
@@ -45,7 +46,9 @@ function Shell({ mine, showAuthor, authorName, theme, colors, children, onPress,
     return (
         <View style={[styles.line, mine ? styles.lineMine : styles.lineTheirs, showAuthor && styles.lineFirst]}>
             {!mine && (showAuthor ? <Avatar name={authorName} size={30} /> : <View style={{ width: 30 }} />)}
-            {onPress ? <TouchableOpacity activeOpacity={0.85} onPress={onPress}>{body}</TouchableOpacity> : body}
+            {onPress || onLongPress
+                ? <TouchableOpacity activeOpacity={0.85} onPress={onPress} onLongPress={onLongPress} delayLongPress={350}>{body}</TouchableOpacity>
+                : body}
         </View>
     );
 }
@@ -57,6 +60,16 @@ function Meta({ time, colors, status }: { time: string; colors: ThemeColors; sta
             {status === 'open' && <Ionicons name="time-outline" size={14} color={colors.warning} />}
             {status === 'done' && <Ionicons name="checkmark-done" size={16} color={colors.success} />}
             {status === 'cancelled' && <Ionicons name="close-circle-outline" size={14} color={colors.textSecondary} />}
+        </View>
+    );
+}
+
+/** What is left of a deleted message. */
+function Deleted({ colors }: { colors: ThemeColors }) {
+    return (
+        <View style={styles.deleted}>
+            <Ionicons name="ban-outline" size={14} color={colors.textSecondary} />
+            <Text style={[styles.deletedText, { color: colors.textSecondary }]}>Message deleted</Text>
         </View>
     );
 }
@@ -100,17 +113,31 @@ export function JobTag({ job, colors, meId, onKind, onAssignee }: {
     );
 }
 
-/** A post in the group chat. Tapping it opens the job's thread. */
-export function JobBubble({ job, mine, showAuthor, meId, theme, colors, onPress }: {
+/** A post in the group chat. Tapping it opens the job's thread; holding it offers Delete. */
+export function JobBubble({ job, mine, showAuthor, meId, theme, colors, onPress, onLongPress }: {
     job: Job; mine: boolean; showAuthor: boolean; meId?: string; theme: 'light' | 'dark';
-    colors: ThemeColors; onPress: () => void;
+    colors: ThemeColors; onPress: () => void; onLongPress?: () => void;
 }) {
     const width = useBubbleWidth() - 16;
     const forMe = !!meId && job.assignee?.id === meId && job.status === 'open';
     const customer = job.customer_name || job.customer_hint;
+    if (job.deleted) {
+        return (
+            <Shell mine={mine} showAuthor={showAuthor} authorName={job.author.name} theme={theme} colors={colors}
+                onPress={job.replies ? onPress : undefined}>
+                <Deleted colors={colors} />
+                <View style={styles.footer}>
+                    {job.replies
+                        ? <Text style={[styles.repliesText, { color: colors.primary }]}>{job.replies === 1 ? '1 reply' : `${job.replies} replies`}</Text>
+                        : <View />}
+                    <Meta time={job.created_at} colors={colors} />
+                </View>
+            </Shell>
+        );
+    }
     return (
         <Shell mine={mine} showAuthor={showAuthor} authorName={job.author.name} theme={theme} colors={colors}
-            onPress={onPress} highlight={forMe ? colors.primary : undefined}>
+            onPress={onPress} onLongPress={onLongPress} highlight={forMe ? colors.primary : undefined}>
             {!!job.attachment && (
                 <View style={{ gap: 4 }}>
                     <TeamImage a={job.attachment} colors={colors} width={width} />
@@ -145,15 +172,26 @@ export function JobBubble({ job, mine, showAuthor, meId, theme, colors, onPress 
 }
 
 /** One message in a job's thread. A reply with no author is SmartOps itself. */
-export function ReplyBubble({ reply, mine, showAuthor, theme, colors, onRetryRead, retrying }: {
+export function ReplyBubble({ reply, mine, showAuthor, theme, colors, onRetryRead, retrying, onLongPress }: {
     reply: Reply; mine: boolean; showAuthor: boolean; theme: 'light' | 'dark'; colors: ThemeColors;
     /** Offered under a photo/PDF whose read failed. */
     onRetryRead?: (documentId: string) => void; retrying?: boolean;
+    /** Holding my own message offers Delete. */
+    onLongPress?: () => void;
 }) {
     const width = useBubbleWidth() - 16;
     if (!reply.author) return <SystemNote text={reply.body} colors={colors} />;
+    if (reply.deleted) {
+        return (
+            <Shell mine={mine} showAuthor={showAuthor} authorName={reply.author.name} theme={theme} colors={colors}>
+                <Deleted colors={colors} />
+                <View style={styles.footer}><View /><Meta time={reply.created_at} colors={colors} /></View>
+            </Shell>
+        );
+    }
     return (
-        <Shell mine={mine} showAuthor={showAuthor} authorName={reply.author.name} theme={theme} colors={colors}>
+        <Shell mine={mine} showAuthor={showAuthor} authorName={reply.author.name} theme={theme} colors={colors}
+            onLongPress={onLongPress}>
             {!!reply.attachment && <TeamImage a={reply.attachment} colors={colors} width={width} />}
             {!!reply.attachment && <ReadState a={reply.attachment} colors={colors} onRetry={onRetryRead} retrying={retrying} />}
             {!!reply.voice && <VoiceNote voice={reply.voice} colors={colors} tint={colors.primary} />}
@@ -219,6 +257,8 @@ const styles = StyleSheet.create({
     theirsFirst: { borderTopLeftRadius: 4 },
     author: { fontSize: 13, fontWeight: '800', marginBottom: -2, paddingHorizontal: 2 },
     body: { fontSize: 15.5, lineHeight: 21, paddingHorizontal: 2 },
+    deleted: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 2, paddingVertical: 2 },
+    deletedText: { fontSize: 14.5, fontStyle: 'italic' },
     read: { fontSize: 11.5, fontWeight: '600', paddingHorizontal: 2 },
     facts: { fontSize: 12, fontWeight: '600', paddingHorizontal: 2 },
     tagRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
