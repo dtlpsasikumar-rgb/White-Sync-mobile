@@ -46,7 +46,7 @@ export interface Attachment {
 /** A voice note: the recording (play it via `team.voiceSource`), what it says in English
  * (also the post's text), and the words as spoken. `text` is null when it could not be
  * written out -- the recording still plays. */
-export interface Voice { url: string; text?: string | null; said?: string | null }
+export interface Voice { url: string; text?: string | null; said?: string | null; tamil?: string | null }
 
 /** A recording made in the app, waiting to be sent. */
 export interface PickedVoice { uri: string; seconds: number }

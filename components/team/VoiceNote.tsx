@@ -1,6 +1,7 @@
 /**
  * A voice note in the chat: play / pause, how far along it is, and -- when SmartOps wrote it
- * out -- the words as spoken under the English (the English is the bubble's text already).
+ * out -- the same message in Tamil under the English (the English is the bubble's text
+ * already), and the words as spoken when they are neither.
  * The recording loads with the SmartOps sign-in headers, like a posted photo.
  */
 
@@ -61,7 +62,10 @@ export function VoiceNote({ voice, colors, tint }: {
             {voice.text == null && (
                 <Text style={[styles.note, { color: colors.textSecondary }]}>Voice note — could not be written out</Text>
             )}
-            {!!voice.said && voice.said !== voice.text && (
+            {!!voice.tamil && voice.tamil !== voice.text && (
+                <Text style={[styles.tamil, { color: colors.text }]}>{voice.tamil}</Text>
+            )}
+            {!!voice.said && voice.said !== voice.text && voice.said !== voice.tamil && (
                 <Text style={[styles.note, { color: colors.textSecondary }]}>Said: {voice.said}</Text>
             )}
         </View>
@@ -75,4 +79,5 @@ const styles = StyleSheet.create({
     fill: { height: 4 },
     time: { fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
     note: { fontSize: 12, fontStyle: 'italic' },
+    tamil: { fontSize: 15, lineHeight: 22 },
 });
