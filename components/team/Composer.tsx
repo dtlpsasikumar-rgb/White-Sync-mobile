@@ -4,17 +4,24 @@
  * Chips above the box are shortcuts. An `insert` chip starts the message ("Ravi, ") --
  * SmartOps reads who a post is for from the name it starts with. A `send` chip sends at
  * once ("Done ✅" closes a job given to you).
+ *
+ * With nothing typed or attached, the send button is a mic: tap to record a voice note, then
+ * send or bin it. SmartOps writes the note out, and that text is read like a typed post.
  */
 
 import React, { useState } from 'react';
 import {
-    ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+    ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import {
+    RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder,
+    useAudioRecorderState,
+} from 'expo-audio';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, Radius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { PickedFile } from '@/services/teamApi';
+import { PickedFile, PickedVoice } from '@/services/teamApi';
 import { pickAttachment, takePhoto } from './Attach';
 import { isImageAttachment } from './chatUi';
 
@@ -28,7 +35,7 @@ export interface ComposerChip {
 }
 
 export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
-    onSend: (text: string, file: PickedFile | null) => Promise<boolean>;
+    onSend: (text: string, file: PickedFile | null, voice?: PickedVoice | null) => Promise<boolean>;
     placeholder: string;
     chips?: ComposerChip[];
     chipsTitle?: string;
@@ -40,6 +47,39 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
     const [sending, setSending] = useState(false);
 
     const canSend = !sending && (!!text.trim() || !!file);
+    const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+    const recState = useAudioRecorderState(recorder, 250);
+    const recording = recState.isRecording;
+    const seconds = Math.floor((recState.durationMillis || 0) / 1000);
+
+    const startRecording = async () => {
+        try {
+            const { granted } = await requestRecordingPermissionsAsync();
+            if (!granted) {
+                Alert.alert('Microphone', 'Allow the microphone to record voice notes.');
+                return;
+            }
+            await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+            await recorder.prepareToRecordAsync();
+            recorder.record();
+        } catch (e) {
+            Alert.alert('Voice note', `Could not start recording: ${String(e)}`);
+        }
+    };
+
+    /** Stop; send the note (`keep`) or bin it. A note under a second is binned: a slip. */
+    const stopRecording = async (keep: boolean) => {
+        const length = (recState.durationMillis || 0) / 1000;
+        try {
+            await recorder.stop();
+        } finally {
+            setAudioModeAsync({ allowsRecording: false }).catch(() => { });
+        }
+        if (!keep || !recorder.uri || length < 1) return;
+        setSending(true);
+        await onSend('', null, { uri: recorder.uri, seconds: length });
+        setSending(false);
+    };
 
     /** Send what is typed, or (from a chip) a fixed line -- which leaves the typed text alone. */
     const send = async (chipText?: string) => {
@@ -97,6 +137,23 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
                 </View>
             )}
 
+            {recording ? (
+                <View style={styles.row}>
+                    <View style={[styles.box, styles.recBox, { backgroundColor: colors.surface, borderColor: '#EF4444' }]}>
+                        <TouchableOpacity onPress={() => stopRecording(false)} hitSlop={8} style={styles.boxIcon}>
+                            <Ionicons name="trash-outline" size={22} color="#EF4444" />
+                        </TouchableOpacity>
+                        <View style={styles.recDot} />
+                        <Text style={[styles.recText, { color: colors.text }]}>
+                            Recording {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
+                        </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => stopRecording(true)}
+                        style={[styles.send, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="send" size={20} color="#FFF" style={{ marginLeft: 3 }} />
+                    </TouchableOpacity>
+                </View>
+            ) : (
             <View style={styles.row}>
                 <View style={[styles.box, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                     <TouchableOpacity onPress={() => pickAttachment(setFile)} hitSlop={8} style={styles.boxIcon}>
@@ -116,16 +173,24 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
                         </TouchableOpacity>
                     )}
                 </View>
-                <TouchableOpacity
-                    disabled={!canSend}
-                    onPress={() => send()}
-                    style={[styles.send, { backgroundColor: canSend ? colors.primary : colors.surfaceVariant }]}
-                >
-                    {sending
-                        ? <ActivityIndicator color="#FFF" size="small" />
-                        : <Ionicons name="send" size={20} color={canSend ? '#FFF' : colors.textSecondary} style={{ marginLeft: 3 }} />}
-                </TouchableOpacity>
+                {canSend || sending ? (
+                    <TouchableOpacity
+                        disabled={!canSend}
+                        onPress={() => send()}
+                        style={[styles.send, { backgroundColor: colors.primary }]}
+                    >
+                        {sending
+                            ? <ActivityIndicator color="#FFF" size="small" />
+                            : <Ionicons name="send" size={20} color="#FFF" style={{ marginLeft: 3 }} />}
+                    </TouchableOpacity>
+                ) : (
+                    <TouchableOpacity onPress={startRecording} accessibilityLabel="Record a voice note"
+                        style={[styles.send, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="mic" size={22} color="#FFF" />
+                    </TouchableOpacity>
+                )}
             </View>
+            )}
         </View>
     );
 }
@@ -148,4 +213,7 @@ const styles = StyleSheet.create({
     boxIcon: { width: 36, height: 46, justifyContent: 'center', alignItems: 'center' },
     input: { flex: 1, fontSize: 16, paddingVertical: 12, paddingHorizontal: 4, maxHeight: 120 },
     send: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+    recBox: { alignItems: 'center', borderWidth: 1.5 },
+    recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#EF4444', marginHorizontal: 6 },
+    recText: { flex: 1, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
 });

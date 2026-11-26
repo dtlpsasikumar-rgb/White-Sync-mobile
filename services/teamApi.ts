@@ -43,6 +43,14 @@ export interface Attachment {
     file_url: string;
 }
 
+/** A voice note: the recording (play it via `team.voiceSource`), what it says in English
+ * (also the post's text), and the words as spoken. `text` is null when it could not be
+ * written out -- the recording still plays. */
+export interface Voice { url: string; text?: string | null; said?: string | null }
+
+/** A recording made in the app, waiting to be sent. */
+export interface PickedVoice { uri: string; seconds: number }
+
 export interface Job {
     id: string;
     body: string;
@@ -71,6 +79,7 @@ export interface Job {
     age_minutes: number;
     replies: number;
     last_reply_at?: string | null;
+    voice?: Voice | null;
 }
 
 export interface Reply {
@@ -80,6 +89,7 @@ export interface Reply {
     closed_job: boolean;
     attachment?: Attachment | null;
     created_at: string;
+    voice?: Voice | null;
 }
 
 export interface JobDetail { job: Job; thread: Reply[] }
@@ -207,9 +217,12 @@ async function call<T>(send: (headers: Record<string, string>) => Promise<{ ok: 
 const get = <T>(path: string) => call<T>(h => apiGet(smartopsUrl(path), null, h));
 const post = <T>(path: string, body: unknown = {}) => call<T>(h => apiPost(smartopsUrl(path), body, null, h));
 
-function form(body: string, file?: PickedFile | null): FormData {
+function form(body: string, file?: PickedFile | null, voice?: PickedVoice | null): FormData {
     const f = new FormData();
     f.append('body', body);
+    if (voice?.uri) {
+        f.append('voice', { uri: voice.uri, name: 'voice.m4a', type: 'audio/m4a' } as any);
+    }
     if (file?.uri) {
         const name = file.name || file.uri.split('/').pop() || 'photo.jpg';
         f.append('file', { uri: file.uri, name, type: file.mimeType || 'image/jpeg' } as any);
@@ -224,10 +237,10 @@ export const team = {
     jobs: (view: JobView, before?: string | null) =>
         get<Jobs>(`/bff/v1/team/jobs?view=${view}${before ? `&before=${encodeURIComponent(before)}` : ''}`),
     job: (id: string) => get<JobDetail>(`/bff/v1/team/jobs/${id}`),
-    post: (body: string, file?: PickedFile | null) =>
-        call<JobDetail>(h => apiPostForm(smartopsUrl('/bff/v1/team/jobs'), form(body, file), h)),
-    reply: (id: string, body: string, file?: PickedFile | null) =>
-        call<JobDetail>(h => apiPostForm(smartopsUrl(`/bff/v1/team/jobs/${id}/replies`), form(body, file), h)),
+    post: (body: string, file?: PickedFile | null, voice?: PickedVoice | null) =>
+        call<JobDetail>(h => apiPostForm(smartopsUrl('/bff/v1/team/jobs'), form(body, file, voice), h)),
+    reply: (id: string, body: string, file?: PickedFile | null, voice?: PickedVoice | null) =>
+        call<JobDetail>(h => apiPostForm(smartopsUrl(`/bff/v1/team/jobs/${id}/replies`), form(body, file, voice), h)),
     done: (id: string) => post<JobDetail>(`/bff/v1/team/jobs/${id}/done`),
     /** Read a photo/PDF on this job again, after a read that failed. */
     reread: (id: string, documentId: string) =>
@@ -251,6 +264,7 @@ export const team = {
             `/bff/v1/team/last-rate?customer=${encodeURIComponent(customer)}&item_code=${encodeURIComponent(itemCode)}`),
     /** The attachment, as an image source with the headers SmartOps needs. */
     fileSource: async (a: Attachment) => ({ uri: smartopsUrl(a.file_url), headers: await authHeaders() }),
+    voiceSource: async (v: Voice) => ({ uri: smartopsUrl(v.url), headers: await authHeaders() }),
 };
 
 // ─────────────────────────── small display helpers ───────────────────────────

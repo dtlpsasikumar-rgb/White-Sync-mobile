@@ -26,7 +26,7 @@ import { Colors, Radius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useResponsive } from '@/hooks/useResponsive';
 import { notificationService } from '@/services/NotificationService';
-import { age, erpSession, Job, JobView, People, PickedFile, team } from '@/services/teamApi';
+import { age, erpSession, Job, JobView, People, PickedFile, PickedVoice, team } from '@/services/teamApi';
 
 type Tab = 'chat' | 'mine' | 'open' | 'sent';
 const TABS: { tab: Tab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -121,8 +121,8 @@ export default function TeamScreen() {
         setOlder(page.length ? r.data.next_before ?? page[page.length - 1].created_at : null);
     };
 
-    const post = async (text: string, file: PickedFile | null) => {
-        const r = await team.post(text, file);
+    const post = async (text: string, file: PickedFile | null, voice?: PickedVoice | null) => {
+        const r = await team.post(text, file, voice);
         if (!r.ok) {
             Alert.alert('Not posted', r.error);
             return false;

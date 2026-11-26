@@ -13,6 +13,7 @@ import { age, Attachment, Job, KIND_COLORS, KIND_ICONS, Reply } from '@/services
 import { Avatar } from './Avatar';
 import { displayName, personColor, timeOnly } from './chatUi';
 import { readLine, TeamImage } from './TeamImage';
+import { VoiceNote } from './VoiceNote';
 
 type ThemeColors = typeof Colors.light;
 
@@ -120,6 +121,7 @@ export function JobBubble({ job, mine, showAuthor, meId, theme, colors, onPress 
                     )}
                 </View>
             )}
+            {!!job.voice && <VoiceNote voice={job.voice} colors={colors} tint={colors.primary} />}
             {!!job.body && (
                 <Text style={[styles.body, { color: colors.text, opacity: job.status === 'cancelled' ? 0.55 : 1 }]}>{job.body}</Text>
             )}
@@ -154,6 +156,7 @@ export function ReplyBubble({ reply, mine, showAuthor, theme, colors, onRetryRea
         <Shell mine={mine} showAuthor={showAuthor} authorName={reply.author.name} theme={theme} colors={colors}>
             {!!reply.attachment && <TeamImage a={reply.attachment} colors={colors} width={width} />}
             {!!reply.attachment && <ReadState a={reply.attachment} colors={colors} onRetry={onRetryRead} retrying={retrying} />}
+            {!!reply.voice && <VoiceNote voice={reply.voice} colors={colors} tint={colors.primary} />}
             {!!reply.body && <Text style={[styles.body, { color: colors.text }]}>{reply.body}</Text>}
             <View style={styles.footer}>
                 {reply.closed_job
