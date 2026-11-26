@@ -265,6 +265,14 @@ export const team = {
     /** The attachment, as an image source with the headers SmartOps needs. */
     fileSource: async (a: Attachment) => ({ uri: smartopsUrl(a.file_url), headers: await authHeaders() }),
     voiceSource: async (v: Voice) => ({ uri: smartopsUrl(v.url), headers: await authHeaders() }),
+    /** Speak instead of typing: the recording written out, for the message box. Nothing is
+     * posted and the recording is not kept. */
+    transcribe: (voice: PickedVoice) => {
+        const f = new FormData();
+        f.append('voice', { uri: voice.uri, name: 'voice.m4a', type: 'audio/m4a' } as any);
+        return call<{ text: string; tamil: string; said: string }>(
+            h => apiPostForm(smartopsUrl('/bff/v1/team/transcribe'), f, h));
+    },
 };
 
 // ─────────────────────────── small display helpers ───────────────────────────

@@ -5,8 +5,9 @@
  * SmartOps reads who a post is for from the name it starts with. A `send` chip sends at
  * once ("Done ✅" closes a job given to you).
  *
- * With nothing typed or attached, the send button is a mic: tap to record a voice note, then
- * send or bin it. SmartOps writes the note out, and that text is read like a typed post.
+ * With nothing typed or attached, the send button is a mic: speak instead of typing. SmartOps
+ * writes out what was said -- in English, or Tamil with the EN/த switch -- into the box, to
+ * check, correct and send as an ordinary text message. No recording is posted.
  */
 
 import React, { useState } from 'react';
@@ -21,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, Radius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { PickedFile, PickedVoice } from '@/services/teamApi';
+import { PickedFile, PickedVoice, team } from '@/services/teamApi';
 import { pickAttachment, takePhoto } from './Attach';
 import { isImageAttachment } from './chatUi';
 
@@ -51,6 +52,8 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
     const recState = useAudioRecorderState(recorder, 250);
     const recording = recState.isRecording;
     const seconds = Math.floor((recState.durationMillis || 0) / 1000);
+    const [lang, setLang] = useState<'en' | 'ta'>('en');
+    const [writing, setWriting] = useState(false);
 
     const startRecording = async () => {
         try {
@@ -67,7 +70,7 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
         }
     };
 
-    /** Stop; send the note (`keep`) or bin it. A note under a second is binned: a slip. */
+    /** Stop; write out what was said into the box (`keep`) or bin it. Under a second is a slip. */
     const stopRecording = async (keep: boolean) => {
         const length = (recState.durationMillis || 0) / 1000;
         try {
@@ -76,9 +79,12 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
             setAudioModeAsync({ allowsRecording: false }).catch(() => { });
         }
         if (!keep || !recorder.uri || length < 1) return;
-        setSending(true);
-        await onSend('', null, { uri: recorder.uri, seconds: length });
-        setSending(false);
+        setWriting(true);
+        const r = await team.transcribe({ uri: recorder.uri, seconds: length });
+        setWriting(false);
+        if (!r.ok) { Alert.alert('Voice', r.error); return; }
+        const words = lang === 'ta' ? (r.data.tamil || r.data.text) : (r.data.text || r.data.tamil);
+        setText(t => (t.trim() ? `${t.trim()} ${words}` : words));
     };
 
     /** Send what is typed, or (from a chip) a fixed line -- which leaves the typed text alone. */
@@ -145,12 +151,12 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
                         </TouchableOpacity>
                         <View style={styles.recDot} />
                         <Text style={[styles.recText, { color: colors.text }]}>
-                            Recording {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
+                            Listening {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
                         </Text>
                     </View>
-                    <TouchableOpacity onPress={() => stopRecording(true)}
+                    <TouchableOpacity onPress={() => stopRecording(true)} accessibilityLabel="Write it out"
                         style={[styles.send, { backgroundColor: colors.primary }]}>
-                        <Ionicons name="send" size={20} color="#FFF" style={{ marginLeft: 3 }} />
+                        <Ionicons name="checkmark" size={24} color="#FFF" />
                     </TouchableOpacity>
                 </View>
             ) : (
@@ -183,11 +189,22 @@ export function Composer({ onSend, placeholder, chips = [], chipsTitle }: {
                             ? <ActivityIndicator color="#FFF" size="small" />
                             : <Ionicons name="send" size={20} color="#FFF" style={{ marginLeft: 3 }} />}
                     </TouchableOpacity>
+                ) : writing ? (
+                    <View style={[styles.send, { backgroundColor: colors.surfaceVariant }]}>
+                        <ActivityIndicator color={colors.primary} size="small" />
+                    </View>
                 ) : (
-                    <TouchableOpacity onPress={startRecording} accessibilityLabel="Record a voice note"
-                        style={[styles.send, { backgroundColor: colors.primary }]}>
-                        <Ionicons name="mic" size={22} color="#FFF" />
-                    </TouchableOpacity>
+                    <>
+                        <TouchableOpacity onPress={() => setLang(l => (l === 'en' ? 'ta' : 'en'))}
+                            accessibilityLabel="Language to write in"
+                            style={[styles.lang, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                            <Text style={[styles.langText, { color: colors.primary }]}>{lang === 'en' ? 'EN' : 'த'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={startRecording} accessibilityLabel="Speak instead of typing"
+                            style={[styles.send, { backgroundColor: colors.primary }]}>
+                            <Ionicons name="mic" size={22} color="#FFF" />
+                        </TouchableOpacity>
+                    </>
                 )}
             </View>
             )}
@@ -216,4 +233,6 @@ const styles = StyleSheet.create({
     recBox: { alignItems: 'center', borderWidth: 1.5 },
     recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#EF4444', marginHorizontal: 6 },
     recText: { flex: 1, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    lang: { height: 48, minWidth: 40, borderRadius: 24, borderWidth: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 8 },
+    langText: { fontSize: 15, fontWeight: '900' },
 });
